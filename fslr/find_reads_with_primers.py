@@ -49,7 +49,7 @@ def check_primer(primer_pairs, seq):
 
 def run_porechop(samp, out):
     subprocess.run(
-        f"/home/kez/Tools/Porechop/porechop-runner.py --discard_middle -t1 -i {samp} -o {out}",
+        f"porechop-runner.py --discard_middle -t1 -i {samp} -o {out}",
                    shell=True, stdout=subprocess.PIPE)
 
 
