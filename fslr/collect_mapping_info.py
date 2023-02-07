@@ -84,6 +84,7 @@ def mapping_info(f, outf):
 
     df = pd.DataFrame.from_records(res).sort_values(['qname', 'qstart'])
 
+
     bad_anchors = []
     # flag reads with small anchoring alignments
     for grp, d in df.groupby('qname'):
@@ -96,4 +97,6 @@ def mapping_info(f, outf):
 
     df = df.sort_values(['n_alignments', 'qname', 'qstart'], ascending=[False, True, True])
 
-    df.to_csv(outf)
+    df = df[['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
+             'alignment_score', 'short_anchor<50bp', 'seq']]
+    df.to_csv(outf, index=False, sep="\t")

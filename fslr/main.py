@@ -110,6 +110,6 @@ def pipeline(**args):
 
         assert len(glob.glob(f"{basename}.bwa_dodi.bam")) == 1
 
-        collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam", f"{basename}.mappings.csv")
+        collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam", f"{basename}.mappings.bed")
 
         print('fslr finished')
