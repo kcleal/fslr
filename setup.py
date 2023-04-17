@@ -3,14 +3,17 @@ from setuptools import setup, find_packages
 
 setup(
     name="fslr",
-    version='0.0.3',
+    version='0.2.0',
     license='MIT',
     python_requires='>=3.7',
     install_requires=[
             'numpy',
             'pandas',
             'click',
-            'matplotlib'
+            'matplotlib',
+            'networkx',
+            'pafpy',
+            'pysam',
         ],
     packages=find_packages(where="."),
     package_data={'': ['primers.csv']},

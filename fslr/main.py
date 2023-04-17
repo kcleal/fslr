@@ -2,11 +2,13 @@ import click
 import pandas as pd
 import os
 import glob
-from fslr import filter_junk_from_fq, find_reads_with_primers, collect_mapping_info
+from fslr import filter_junk_from_fq, find_reads_with_primers, collect_mapping_info, cluster_seqs
 import multiprocessing
 import subprocess
 import sys
 
+
+__version__ = 0.2
 
 @click.command()
 @click.option('--name', required=True, help='Sample name')
@@ -14,8 +16,15 @@ import sys
 @click.option('--ref', required=True, help='Reference genome')
 @click.option('--basecalled', required=True, help='Folder of basecalled reads in fastq format to analyse')
 @click.option('--primers', required=True, help='Comma-separated list of primer names. Make sure these are listed in primers.csv')
-@click.option('--procs', required=False, default=8, help='Processors to use')
+@click.option('--trim-threshold', required=False, help='Threshold in range 0-1. Fraction of maximum primer alignment score; primer sites with lower scores'
+                                                      ' are labelled False',
+              default=0.4, type=float, show_default=True)
+@click.option('--cluster-fraction', required=False, help='The proportion of data to try and cluster, range 0-1',
+              default='auto', show_default=True)
+@click.option('--procs', required=False, default=1, show_default=True, help='Processors to use')
 @click.option('--keep-temp', required=False, is_flag=True, flag_value=True, help='Keep temp files')
+@click.option('--skip-clustering', required=False, is_flag=True, flag_value=True, help='Skip clustering step')
+@click.version_option(__version__)
 def pipeline(**args):
 
     with multiprocessing.Manager() as manager:
@@ -26,6 +35,7 @@ def pipeline(**args):
         args['primers'] = args['primers'].split(',')
         ps = set(primers_d['primer_name'])
         basename = f'{args["out"]}/{args["name"]}'
+        print('Basename: ', basename, file=sys.stderr)
 
         for p in args['primers']:
             if p not in ps:
@@ -43,23 +53,7 @@ def pipeline(**args):
         filter_counts['total_dropped'] = 0
         filter_counts['conactemers_dropped'] = 0
         filter_counts['junk_seqs_dropped'] = 0
-
-        v = []
-        for k in list(primers.keys()) + ['False']:
-            for k2 in list(primers.keys()) + ['False']:
-                if k == 'False':
-                    p1 = 'False'
-                else:
-                    p1 = k + 'F'
-                if k2 == 'False':
-                    p2 = 'False'
-                else:
-                    p2 = k2 + 'R'
-                v.append("_".join((p1, p2)))
-                v.append("_".join((p2, p1)))
-
-        for i in sorted(v):
-            filter_counts[i] = 0
+        filter_counts['False_False'] = 0
 
         print('Filtering reads: ', args['basecalled'], file=sys.stderr)
         fs = glob.glob(f'{args["basecalled"]}/*.fq.gz') + glob.glob(f'{args["basecalled"]}/*.fq') + glob.glob(
@@ -73,24 +67,25 @@ def pipeline(**args):
         if args['procs'] > 1:
             with multiprocessing.Pool(args['procs']) as p:
                 p.map(filter_junk_from_fq.func, jobs)
+                pass
         else:
             for j in jobs:
                 filter_junk_from_fq.func(j)
+                pass
 
         jobs = []
         for pth in glob.glob(f'{args["out"]}/*filtered_junk.fq'):
-            jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp']))
+            jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp'], args['trim_threshold']))
         if args['procs'] > 1:
             with multiprocessing.Pool(args['procs']) as p:
                 p.map(find_reads_with_primers.func, jobs)
+                pass
         else:
             for j in jobs:
                 find_reads_with_primers.func(j)
+                pass
 
         print('Filter counts: ', filter_counts, file=sys.stderr)
-        with open(basename + '.filter_counts.csv', 'w') as fc:
-            fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
-            fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
 
         subprocess.run(f"cat {args['out']}/*.no_primers.fq > {basename}.without_primers.fq", shell=True)
         subprocess.run(f"rm {args['out']}/*.no_primers.fq", shell=True)
@@ -105,11 +100,30 @@ def pipeline(**args):
         subprocess.run(c, shell=True)
 
         if not args['keep_temp']:
+            pass
             for pl in glob.glob(f"{basename}.*.primers_labelled.fq"):
                 os.remove(pl)
 
         assert len(glob.glob(f"{basename}.bwa_dodi.bam")) == 1
 
         collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam", f"{basename}.mappings.bed")
+
+        if not args['skip_clustering']:
+
+            cf = args['cluster_fraction']
+            if cf != 'auto':
+                cf = float(cf)
+            cluster_seqs.find_targets(filter_counts, "{basename}.bwa_dodi.bam".format(basename=basename), cluster_fraction=cf)
+
+            c = "minimap2 -X -t {procs} -x ava-ont -N 3 -p 0.9 -n 6 -O 30,60 -m 200 " \
+                " {basename}.cluster_targets.fasta {basename}.cluster_targets.fasta > " \
+                " {basename}.minimap2_cluster.paf".format(basename=basename, procs=args['procs'])
+
+            subprocess.run(c, shell=True)
+            cluster_seqs.cluster_paf(basename, args['procs'])
+
+        with open(basename + '.filter_counts.csv', 'w') as fc:
+            fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
+            fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
 
         print('fslr finished')

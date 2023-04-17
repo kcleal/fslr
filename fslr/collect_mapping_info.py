@@ -26,7 +26,8 @@ def mapping_info(f, outf):
     d = defaultdict(list)
 
     for a in af.fetch(until_eof=True):
-        d[a.qname].append(a)
+        if not a.flag & 4:
+            d[a.qname].append(a)
 
     res = []
     no = 0

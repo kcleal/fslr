@@ -3,3 +3,9 @@ pandas
 numpy
 matplotlib
 scikit-bio
+networkx
+pafpy
+pysam
+
+# conda install -c bioconda -c conda-forge abpoa bwa samtools minimap2 tantan
+# pip install dodi
