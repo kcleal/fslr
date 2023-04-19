@@ -7,7 +7,7 @@ import multiprocessing
 import subprocess
 import sys
 
-__version__ = '0.2'
+__version__ = '0.2.1'
 
 @click.command()
 @click.option('--name', required=True, help='Sample name')
@@ -23,7 +23,7 @@ __version__ = '0.2'
 @click.option('--procs', required=False, default=1, show_default=True, help='Processors to use')
 @click.option('--keep-temp', required=False, is_flag=True, flag_value=True, help='Keep temp files')
 @click.option('--skip-alignment', required=False, is_flag=True, flag_value=True, help='Skip alignment step')
-@click.option('--cluster', required=False, is_flag=True, flag_value=True, help='Skip clustering step')
+@click.option('--cluster', required=False, is_flag=True, flag_value=True, help='Perform clustering step')
 @click.version_option(__version__)
 def pipeline(**args):
 
