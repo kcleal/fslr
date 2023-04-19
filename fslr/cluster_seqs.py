@@ -168,9 +168,6 @@ def cluster_paf(basename, procs):
         jobs = []
         for u in dta:
             for v in dta:
-                # if not (u, v) == ('e66f6026-c6f1-42a4-aa9f-31d6c97f4752', 'e1a8bcf4-9933-4bbf-a208-bddcc991b065') and \
-                #     not (v, u) == ('e1a8bcf4-9933-4bbf-a208-bddcc991b065', 'e66f6026-c6f1-42a4-aa9f-31d6c97f4752'):
-                #     continue
                 if u == v or (u, v) in seen or (v, u) in seen:
                     continue
                 if (u, v) in paf_alignments:
@@ -204,7 +201,6 @@ def cluster_paf(basename, procs):
                 if item:
                     u, v, w = item
                     G2.add_edge(u, v, weight=w)
-                    print('HI', w)
 
     if G2.size() == 0:
         print('Size of community graph was 0. No clusters found sorry.', file=sys.stderr)
@@ -227,15 +223,12 @@ def cluster_paf(basename, procs):
     os.mkdir(basename + '_clusters')
 
     outfs = [pysam.AlignmentFile(basename + f'_clusters/{name}.{cid}.{len(dta)}.bam', 'wb', template=bam) for cid, dta in enumerate(com)]
-    outfs.append(pysam.AlignmentFile(basename + f'_clusters/{name}.singletons.bam', 'wb', template=bam))
-
     singles = 0
     for a in bam.fetch(until_eof=True):
         if a.qname in names_2_id:
             cid = names_2_id[a.qname]
             outfs[cid].write(a)
         else:
-            outfs[-1].write(a)
             singles += 1
 
     print('n single read clusters', singles, file=sys.stderr)
@@ -249,7 +242,10 @@ def cluster_paf(basename, procs):
 
     for cid, dta in enumerate(com):
         b = basename + f'_clusters/{name}.{cid}.{len(dta)}.bam'
-        c = f"samtools fasta {b} | abpoa - > {basename}_clusters/{name}.{cid}.cons.fa"
+        c = f"samtools fasta {b} > {basename}_clusters/{name}.{cid}.cluster_reads.fa"
         subprocess.run(c, shell=True)
+        c = f"samtools fasta {b} | abpoa - | sed 's/>Consensus/>{name}.{cid}/g' | > {basename}_clusters/{name}.{cid}.cons.fa"
+        subprocess.run(c, shell=True)
+        subprocess.run(f'rm {b}', shell=True)
 
     print('Clustering done', file=sys.stderr)
