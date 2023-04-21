@@ -3,9 +3,6 @@ import pandas as pd
 import sys
 from collections import defaultdict
 
-# f = sys.argv[1]
-# outf = sys.argv[2]
-
 
 def get_query_pos_from_cigartuples(r):
     # Infer the position on the query sequence of the alignment using cigar string
@@ -101,3 +98,13 @@ def mapping_info(f, outf):
     df = df[['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
              'alignment_score', 'short_anchor<50bp', 'seq']]
     df.to_csv(outf, index=False, sep="\t")
+
+
+if __name__ == '__main__':
+    import argparse
+    parse = argparse.ArgumentParser()
+    parse.add_argument('--bam', help='bam file to assess')
+    parse.add_argument('--out', help='out put bed file')
+    args = parse.parse_args()
+    mapping_info(args.bam, args.out)
+    print('Done')
