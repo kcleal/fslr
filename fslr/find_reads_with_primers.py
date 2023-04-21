@@ -71,7 +71,8 @@ def check_primer2(primer_pairs, read, trim_thresh):
     target_end = len(seq) - best[7] + best[5].target_end_optimal
     trimmed = target_begin + (len(seq) - target_end)
     read.sequence = read.sequence[target_begin:target_end]
-    read.quality = read.quality[target_begin:target_end]
+    if read.quality:
+        read.quality = read.quality[target_begin:target_end]
     return best[0], best[1], best[2], best[3], trimmed
 
 

@@ -65,27 +65,30 @@ def check_for_concatemer(seq, target_primers, primers, primers_r):
 
     for k in target_primers:
         for s in [primers[k], primers_r[k]]:
-            # for s in pseqs:
             ls = len(s) * 4
             if len(seq) < 4 * ls:
                 return True  # drop anyway
             trim = seq[ls:len(seq)-ls]
             # check alignment
             if len(trim) > 10000:
-                i = 0
                 seq_len = len(trim)
+                start = 0
+                end = 10_000
                 while True:
-                    sub = trim[i:min(i+10000, seq_len)]
-                    i += 9950
+                    # include small overlap
+                    sub = trim[max(0, start-len(s) - 1):min(end, seq_len)]
                     aln = StripedSmithWaterman(s)(sub)
                     if aln.optimal_alignment_score >= 28:
                         return True
-                    if min(i+10000, seq_len) == seq_len:
+                    start += 10_000
+                    end += 10_000
+                    if start >= seq_len:
                         break
             else:
                 aln = StripedSmithWaterman(s)(trim)
                 if aln.optimal_alignment_score >= 28:
                     return True
+
     return False
 
 
