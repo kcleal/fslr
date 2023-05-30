@@ -2,6 +2,7 @@ import pysam
 import pandas as pd
 import sys
 from collections import defaultdict
+import pkg_resources
 
 
 def get_query_pos_from_cigartuples(r):
@@ -17,6 +18,8 @@ def get_query_pos_from_cigartuples(r):
 
 
 def mapping_info(f, outf):
+    flsr_version = pkg_resources.get_distribution("fslr").version
+
     af = pysam.AlignmentFile(f, 'r')
     d = defaultdict(list)
     for a in af.fetch(until_eof=True):
@@ -65,7 +68,8 @@ def mapping_info(f, outf):
                  'aln_size': qend - qstart,
                  'mapq': a.mapq,
                  'alignment_score': a.get_tag('AS'),
-                 'seq': seq if pri else ''
+                 'seq': seq if pri else '',
+                 'fslr_version': flsr_version,
                  }
             )
 
@@ -88,7 +92,7 @@ def mapping_info(f, outf):
     df = df.sort_values(['n_alignments', 'qname', 'qstart'], ascending=[False, True, True])
 
     df = df[['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
-             'alignment_score', 'short_anchor<50bp', 'seq']]
+             'alignment_score', 'short_anchor<50bp', 'fslr_version', 'seq']]
     df.to_csv(outf, index=False, sep="\t")
 
 

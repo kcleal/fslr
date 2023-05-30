@@ -4,9 +4,9 @@ from collections import defaultdict
 from skbio.alignment import StripedSmithWaterman
 import sys
 
-"""
-Try and pull out reads with the expected primer sequences
-"""
+################################################
+# Label reads with the expected primer sequences
+################################################
 
 
 def rev_comp(s):
@@ -86,8 +86,10 @@ def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
             k2_forward = key_to_p[k2]
             k2_reverse = rev_comp(k2_forward)
             primer_pairs.add((k1_forward, k2_reverse, k1, k2, "F", "R"))
-            if k1 != k2:
-                primer_pairs.add((k1_reverse, k2_forward, k1, k2, "R", "F"))
+            primer_pairs.add((k1_reverse, k2_forward, k1, k2, "R", "F"))
+
+            primer_pairs.add((k1_forward, k2_forward, k1, k2, "F", "F"))
+            primer_pairs.add((k1_reverse, k2_reverse, k1, k2, "R", "R"))
 
     total = 0
     counts = defaultdict(int)
@@ -106,9 +108,11 @@ def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
             recs.append({"p": f"{key[0]}_{key[1]}", "l": len(aln.sequence), "name": aln.name})
             if key[2] != 'False' or key[3] != 'False':
                 aln.name = f"{aln.name}.{key[0]}_{key[1]}.{key[2]}_{key[3]}"
+                print(aln.name, file=sys.stderr)
                 out.write(str(aln) + "\n")
             else:
                 aln.name = f"{aln.name}.{key[0]}_{key[1]}.{key[2]}_{key[3]}"
+                print(aln.name, file=sys.stderr)
                 out2.write(str(aln) + "\n")
             counts[f'{key[2]}_{key[3]}'] += 1
             total += 1
@@ -117,7 +121,6 @@ def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
 
 
 def func(args):
-
     path, key_to_p, lock, filter_counts, keep_temp, trim_thresh = args
     basename = path.replace('.filtered_junk.fq', '')
     counts, recs = label_and_chop_primers(f'{basename}.filtered_junk.fq', key_to_p, basename, trim_thresh)
@@ -125,6 +128,5 @@ def func(args):
         if k not in filter_counts:
             filter_counts[k] = 0
         filter_counts[k] += v
-    # print(f'find_reads_with_primers counts', filter_counts, file=sys.stderr)
     if not keep_temp:
         os.remove(f'{basename}.filtered_junk.fq')

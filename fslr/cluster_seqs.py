@@ -16,6 +16,9 @@ import re
 from skbio.alignment import StripedSmithWaterman
 import multiprocessing
 from sklearn.ensemble import IsolationForest
+from pywfa.align import WavefrontAligner
+
+from networkx.algorithms import approximation
 
 
 def find_targets(filter_counts, path, cluster_fraction='auto'):
@@ -62,7 +65,7 @@ def find_targets(filter_counts, path, cluster_fraction='auto'):
     bam = pysam.AlignmentFile(path, 'rb')
     with open(basename + '.cluster_targets.fasta', 'w') as fq:
         for r in bam:
-            if r.flag & 2304 and r.qname in outlier_names:
+            if not r.flag & 2304: # and r.qname in outlier_names:
                 fq.write(f'>{r.qname}\n{r.seq}\n')
 
     return
@@ -92,7 +95,7 @@ def gaps_in_cigar(cigar):
         if c[i + 1] not in "DI":
             if c[i + 1] == 'M':
                 aligned_bases += int(c[i])
-            continue  # Don't count deletions, or soft/hard clips at right-hand side
+            continue  # Don't count deletions, or soft/hard clips at right-hand side, or X mismatches
         if int(c[i]) >= 30:
             gaps = True
     return aligned_bases, gaps
@@ -100,11 +103,23 @@ def gaps_in_cigar(cigar):
 
 def proc_job(args):
     v_qseq, tseq, u, v = args
+    #
+    a = WavefrontAligner(v_qseq)(tseq)
+    wfa_score = abs(a.score / max(len(v_qseq), len(tseq)))
+    aligned_bases, gaps = gaps_in_cigar(a.cigarstring)
+    w = aligned_bases / len(v_qseq)
+    # if gaps or w < 0.9:
+    if gaps or wfa_score > 0.4:
+        return False
+
+    return u, v, (1 - wfa_score)**2 #w
+
+    # old method:
     query = StripedSmithWaterman(v_qseq, suppress_sequences=True)
     res = query(tseq)
     aligned_bases, gaps = gaps_in_cigar(res.cigar)
     w = aligned_bases / len(v_qseq)
-    if gaps or w < 0.9:
+    if gaps or w < 0.98:
         return False
     return u, v, w
 
@@ -118,16 +133,20 @@ def cluster_paf(basename, procs):
     print('Clustering ', basename, file=sys.stderr)
 
     # get lists of candidate matching reads
-    candidates = defaultdict(list)
+    # candidates = defaultdict(set)
+    G = nx.Graph()
+    c = 0
     with pafpy.PafFile(basename + '.minimap2_cluster.paf') as paf:
         for r in paf:
-            if r.qname == r.tname:
-                continue
-            if min(r.qlen, r.tlen) / max(r.qlen, r.tlen) < 0.95:
-                continue
-            candidates[r.qname].append(r)
+            if r.tname != r.qname:
+                #candidates[r.qname].add(r.tname)
+                G.add_edge(r.qname, r.tname)
+                c += 1
+    print('Candidate alignments', c)
 
+    pool = multiprocessing.Pool(procs)
     name_seq = {}
+    jobs = []
     af = pysam.AlignmentFile(basename + '.bwa_dodi.bam', 'rb')
     for a in af:
         if a.flag & 2304:
@@ -137,64 +156,70 @@ def cluster_paf(basename, procs):
             continue
         name_seq[a.qname] = s
 
+
     # par keys:
     # 'blast_identity', 'blen', 'count', 'from_str', 'get_tag', 'index', 'is_inversion', 'is_primary', 'is_secondary',
     # 'is_unmapped', 'mapq', 'mlen', 'qend', 'qlen', 'qname', 'qstart', 'query_aligned_length', 'query_coverage',
     # 'relative_length', 'strand', 'tags', 'target_aligned_length', 'target_coverage', 'tend', 'tlen', 'tname', 'tstart'
 
-    G = nx.Graph()
-    paf_alignments = {}
-    for k, v in candidates.items():
-        tnames = defaultdict(list)
-        for r in v:  # enumerate tnames
-            tnames[r.tname].append(r)
-        for kk, vv in tnames.items():
-            for i in vv:
-                qc = i.query_coverage
-                tc = i.target_coverage
-                if tc > 0.96 and qc > 0.96:
-                    paf_alignments[(i.qname, i.tname)] = i
-                    weight = min(tc, qc) / max(tc, qc)
-                    G.add_edge(k, kk, weight=weight)
-                    break
+
+    # G2 = nx.Graph()
+    # paf_alignments = {}
+    # for k, v in candidates.items():
+    #     tnames = defaultdict(list)
+    #     for r in v:  # enumerate tnames
+    #         tnames[r.tname].append(r)
+    #     for kk, vv in tnames.items():
+    #         for i in vv:
+    #             # qc = i.query_coverage
+    #             # tc = i.target_coverage
+    #             # if tc > min_cov and qc > min_cov:
+    #                 paf_alignments[(i.qname, i.tname)] = i
+    #                 # weight = min(tc, qc) / max(tc, qc)
+    #                 # G.add_edge(k, kk, weight=i.blast_identity())
+    #                 G.add_edge(k, kk)
+    #                 # G2.add_edge(k, kk, weight=i.blast_identity())
+    #                 # break
 
     print('Finding connected components', file=sys.stderr)
-    # do second round of clustering within connected components. all-vs-all using local alignment
-    names_2_id = {}
+    # do second round of clustering within connected components. all-vs-all using global alignment
+
     G2 = nx.Graph()
     com = sorted(connected_components(G), key=lambda x: -len(x))
     for clst_id, dta in enumerate(com):
         seen = set([])
+        print(clst_id, len(dta))
         jobs = []
         for u in dta:
             for v in dta:
-                if u == v or (u, v) in seen or (v, u) in seen:
+                if (u, v) in seen or (v, u) in seen:
                     continue
-                if (u, v) in paf_alignments:
-                    i = paf_alignments[(u, v)]
-                elif (v, u) in paf_alignments:
-                    i = paf_alignments[(v, u)]
-                else:
-                    continue
+                # if (u, v) in paf_alignments:
+                #     i = paf_alignments[(u, v)]
+                # elif (v, u) in paf_alignments:
+                #     i = paf_alignments[(v, u)]
+                # else:
+                #     continue
                 seen.add((u, v))
-                if i.qname in name_seq:
-                    qseq = name_seq[i.qname]
-                else:
-                    continue
-                if i.tname in name_seq:
-                    tseq = name_seq[i.tname]
-                else:
-                    continue
-                if not qseq or not tseq:
-                    continue
+                # if i.qname in name_seq:
+                #     qseq = name_seq[i.qname]
+                # else:
+                #     continue
+                # if i.tname in name_seq:
+                #     tseq = name_seq[i.tname]
+                # else:
+                #     continue
+                # if not qseq or not tseq:
+                #     continue
 
-                if i.strand == '-':
-                    v_qseq = qseq.translate(tab)[::-1]
-                else:
-                    v_qseq = qseq
+                qseq = name_seq[u]
+                tseq = name_seq[v]
 
+                v_qseq = qseq.translate(tab)[::-1]
+
+                jobs.append((qseq, tseq, u, v))
                 jobs.append((v_qseq, tseq, u, v))
-
+        print(len(jobs))
         with multiprocessing.Pool(procs) as p:
             res = p.map(proc_job, jobs)
             for item in res:
@@ -202,19 +227,31 @@ def cluster_paf(basename, procs):
                     u, v, w = item
                     G2.add_edge(u, v, weight=w)
 
+
     if G2.size() == 0:
         print('Size of community graph was 0. No clusters found sorry.', file=sys.stderr)
         return
-
+    print('Edges in cluster graph before community detection', len(G2.edges()), file=sys.stderr)
     com = community.greedy_modularity_communities(G2, weight='weight')
-
+    # com = sorted(connected_components(G), key=lambda x: -len(x))
     print('Cluster_ids, N_reads', file=sys.stderr)
+    names_2_id = {}
+    cluster_counts = defaultdict(int)
     for clst_id, dta in enumerate(com):
+
+        sub = G2.subgraph(dta)
+        cluster_counts[len(dta)] += 1
+
+        print(clst_id, len(dta), approximation.average_clustering(sub))
+        print()
+
         if len(dta) == 1:
             continue
-        print(clst_id, len(dta), file=sys.stderr)
+
         for k in dta:
             names_2_id[k] = clst_id
+
+    print(cluster_counts)
 
     bam = pysam.AlignmentFile(basename + '.bwa_dodi.bam', 'rb')
 
@@ -224,12 +261,18 @@ def cluster_paf(basename, procs):
 
     outfs = [pysam.AlignmentFile(basename + f'_clusters/{name}.{cid}.{len(dta)}.bam', 'wb', template=bam) for cid, dta in enumerate(com)]
     singles = 0
+    cids = []
     for a in bam.fetch(until_eof=True):
         if a.qname in names_2_id:
             cid = names_2_id[a.qname]
             outfs[cid].write(a)
+            cids.append((cid, a.qname))
         else:
             singles += 1
+
+    with open(f"{basename}.clusterIDs.txt", "w") as cl_out:
+        for i in sorted(cids):
+            cl_out.write(f'{i[0]}\t{i[1]}\n')
 
     print('n single read clusters', singles, file=sys.stderr)
 
@@ -244,7 +287,7 @@ def cluster_paf(basename, procs):
         b = basename + f'_clusters/{name}.{cid}.{len(dta)}.bam'
         c = f"samtools fasta {b} > {basename}_clusters/{name}.{cid}.cluster_reads.fa"
         subprocess.run(c, shell=True)
-        c = f"samtools fasta {b} | abpoa - | sed 's/>Consensus/>{name}.{cid}/g' | > {basename}_clusters/{name}.{cid}.cons.fa"
+        c = f"abpoa {basename}_clusters/{name}.{cid}.cluster_reads.fa | sed 's/Consensus_sequence/{name}.{cid}/g' > {basename}_clusters/{name}.{cid}.cons.fa"
         subprocess.run(c, shell=True)
         subprocess.run(f'rm {b}', shell=True)
 

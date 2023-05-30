@@ -1,13 +1,16 @@
 import click
 import pandas as pd
-import os
 import glob
-from fslr import filter_junk_from_fq, find_reads_with_primers, collect_mapping_info, cluster_seqs
+from fslr import filter_junk_from_fq, find_reads_with_primers, collect_mapping_info, cluster_seqs, find_partners
 import multiprocessing
 import subprocess
 import sys
+import os
+import pkg_resources
 
-__version__ = '0.2.2'
+__version__ = pkg_resources.require("fslr")[0].version
+file_path = os.path.dirname(os.path.realpath(__file__))
+
 
 @click.command()
 @click.option('--name', required=True, help='Sample name')
@@ -112,15 +115,27 @@ def pipeline(**args):
 
         if args['cluster']:
 
+            find_partners.partners("{basename}.bwa_dodi.bam".format(basename=basename))
+
+            quit()
+
             cf = args['cluster_fraction']
             if cf != 'auto':
                 cf = float(cf)
             cluster_seqs.find_targets(filter_counts, "{basename}.bwa_dodi.bam".format(basename=basename), cluster_fraction=cf)
+            # -E 3,2 -O 4,50 -m 200
+            c = "minimap2 -X -t {procs} -r 1000 -x ava-ont -z 40,40  " \
+                " {basename}.cluster_targets.fasta {basename}.cluster_targets.fasta | " \
+                " python3 {file_path}/filter_paf.py 0.95 > " \
+                " {basename}.minimap2_cluster.paf".format(basename=basename, procs=args['procs'], file_path=file_path)
+            subprocess.run(c, shell=True)
+
             cluster_seqs.cluster_paf(basename, args['procs'])
 
-            os.remove("{basename}.minimap2_cluster.paf".format(basename=basename))
+            if not args['keep_temp']:
+                os.remove("{basename}.minimap2_cluster.paf".format(basename=basename))
 
-            c = "cat {basename}_clusters/.*.cons.fa | " \
+            c = "cat {basename}_clusters/*.cons.fa | " \
                 "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
                 "dodi --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
                 "samtools view -bh - |" \
