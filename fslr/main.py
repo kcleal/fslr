@@ -148,7 +148,6 @@ def pipeline(**args):
 
             collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.cons.bam", f"{basename}.mappings.cons.bed")
 
-        #
         with open(basename + '.filter_counts.csv', 'w') as fc:
             fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
             fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
