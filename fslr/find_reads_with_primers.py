@@ -108,11 +108,9 @@ def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
             recs.append({"p": f"{key[0]}_{key[1]}", "l": len(aln.sequence), "name": aln.name})
             if key[2] != 'False' or key[3] != 'False':
                 aln.name = f"{aln.name}.{key[0]}_{key[1]}.{key[2]}_{key[3]}"
-                print(aln.name, file=sys.stderr)
                 out.write(str(aln) + "\n")
             else:
                 aln.name = f"{aln.name}.{key[0]}_{key[1]}.{key[2]}_{key[3]}"
-                print(aln.name, file=sys.stderr)
                 out2.write(str(aln) + "\n")
             counts[f'{key[2]}_{key[3]}'] += 1
             total += 1
