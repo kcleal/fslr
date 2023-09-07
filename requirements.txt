@@ -6,6 +6,9 @@ scikit-bio
 networkx
 pafpy
 pysam
+pywfa
+kmerhash
+scikit-learn
 
 # conda install -c bioconda -c conda-forge abpoa bwa samtools minimap2 tantan
 # pip install dodi

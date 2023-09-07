@@ -17,7 +17,7 @@ def get_query_pos_from_cigartuples(r):
     return start, end, query_length
 
 
-def mapping_info(f, outf):
+def mapping_info(f, outf, regions_path):
     flsr_version = pkg_resources.get_distribution("fslr").version
 
     af = pysam.AlignmentFile(f, 'r')
@@ -25,6 +25,16 @@ def mapping_info(f, outf):
     for a in af.fetch(until_eof=True):
         if not a.flag & 4:
             d[a.qname].append(a)
+
+    regions = defaultdict(list)
+    if regions_path:
+        with open(regions_path, 'r') as rgns:
+            for line in rgns:
+                l = line.strip().split('\t')
+                chrom = l[0]
+                start = int(l[1])
+                end = int(l[2])
+                regions[chrom].append(pd.Interval(left=start, right=end))
 
     res = []
     no = 0
@@ -55,12 +65,21 @@ def mapping_info(f, outf):
             else:
                 yes += 1
                 any_seq = len(seq) if seq else 0
-            res.append(
-                {'qname': a.qname,
+
+            chrom = af.get_reference_name(a.rname)
+            start = a.reference_start + 1
+            end = a.reference_end
+            t = pd.Interval(start, end)
+            if regions and chrom in regions and any(t.overlaps(q) for q in regions[chrom]):
+                overlaps = 1
+            else:
+                overlaps = 0
+
+            rd = {'qname': a.qname,
                  'n_alignments': n_aligns,
-                 'chrom': af.get_reference_name(a.rname),
-                 'rstart': a.reference_start + 1,
-                 'rend': a.reference_end,
+                 'chrom': chrom,
+                 'rstart': start,
+                 'rend': end,
                  'strand': '-' if align_reverse else '+',
                  'qstart': qstart,
                  'qend': qend,
@@ -71,7 +90,11 @@ def mapping_info(f, outf):
                  'seq': seq if pri else '',
                  'fslr_version': flsr_version,
                  }
-            )
+
+            if regions:
+                rd['overlaps_region'] = overlaps
+
+            res.append(rd)
 
         if not any_seq:
             print('missing', qname, [(len(vv.seq), vv.infer_query_length()) if vv.seq else vv.infer_query_length() for vv in v])
@@ -91,8 +114,11 @@ def mapping_info(f, outf):
 
     df = df.sort_values(['n_alignments', 'qname', 'qstart'], ascending=[False, True, True])
 
-    df = df[['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
-             'alignment_score', 'short_anchor<50bp', 'fslr_version', 'seq']]
+    cols = ['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
+             'alignment_score', 'short_anchor<50bp', 'fslr_version', 'seq']
+    if regions:
+        cols.append('overlaps_region')
+    df = df[cols]
     df.to_csv(outf, index=False, sep="\t")
 
 

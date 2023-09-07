@@ -27,6 +27,8 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--keep-temp', required=False, is_flag=True, flag_value=True, help='Keep temp files')
 @click.option('--skip-alignment', required=False, is_flag=True, flag_value=True, help='Skip alignment step')
 @click.option('--cluster', required=False, is_flag=True, flag_value=True, help='Perform clustering step')
+@click.option('--regions', required=False, type=click.Path(exists=True), help='Target regions in bed form to perform biased mapping')
+@click.option('--bias', required=False, default=1.05, show_default=True, type=float, help='Multiply alignment score by bias if alignment falls within target regions')
 @click.version_option(__version__)
 def pipeline(**args):
 
@@ -39,6 +41,7 @@ def pipeline(**args):
         ps = set(primers_d['primer_name'])
         basename = f'{args["out"]}/{args["name"]}'
         print('Basename: ', basename, file=sys.stderr)
+        bias_params = "" if not args['regions'] else f"--bias {args['bias']} --include {args['regions']}"
 
         for p in args['primers']:
             if p not in ps:
@@ -97,10 +100,13 @@ def pipeline(**args):
 
             c = "cat {basename}.*.primers_labelled.fq | " \
                 "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                "dodi --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
                 "samtools view -bh - |" \
                 "samtools sort -o {basename}.bwa_dodi.bam; " \
-                "samtools index {basename}.bwa_dodi.bam".format(basename=basename, procs=args['procs'], ref=args['ref'])
+                "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
+                                                                basename=basename,
+                                                                procs=args['procs'],
+                                                                ref=args['ref'])
 
             subprocess.run(c, shell=True)
 
@@ -111,7 +117,9 @@ def pipeline(**args):
 
             assert len(glob.glob(f"{basename}.bwa_dodi.bam")) == 1
 
-            collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam", f"{basename}.mappings.bed")
+            collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam",
+                                              f"{basename}.mappings.bed",
+                                              args['regions'])
 
         if args['cluster']:
 
@@ -137,16 +145,21 @@ def pipeline(**args):
 
             c = "cat {basename}_clusters/*.cons.fa | " \
                 "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                "dodi --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
                 "samtools view -bh - |" \
                 "samtools sort -o {basename}.bwa_dodi.cons.bam; " \
-                "samtools index {basename}.bwa_dodi.cons.bam".format(basename=basename, procs=args['procs'], ref=args['ref'])
+                "samtools index {basename}.bwa_dodi.cons.bam".format(bias_params=bias_params,
+                                                                     basename=basename,
+                                                                     procs=args['procs'],
+                                                                     ref=args['ref'])
 
             subprocess.run(c, shell=True)
 
             assert len(glob.glob(f"{basename}.bwa_dodi.cons.bam")) == 1
 
-            collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.cons.bam", f"{basename}.mappings.cons.bed")
+            collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.cons.bam",
+                                              f"{basename}.mappings.cons.bed",
+                                              args['regions'])
 
         with open(basename + '.filter_counts.csv', 'w') as fc:
             fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
