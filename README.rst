@@ -6,6 +6,7 @@ Identify split-read alignments from a Fusion-Seq long read experiment.
 
 Table of contents
 -----
+
 - `Installation`_
 - `Usage`_
 - `Options`_
