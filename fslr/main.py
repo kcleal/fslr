@@ -15,22 +15,22 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.command()
 @click.option('--name', required=True, help='Sample name')
 @click.option('--out', required=True, help='Output folder')
-@click.option('--ref', required=False, help='Reference genome')
+@click.option('--ref', required=True, help='Reference genome')
 @click.option('--basecalled', required=False, help='Folder of basecalled reads in fastq format to analyse')
-@click.option('--primers', required=False, help='Comma-separated list of primer names. Make sure these are listed in primers.csv')
+@click.option('--primers', required=True, help='Comma-separated list of primer names. Make sure these are listed in primers.csv')
 @click.option('--trim-threshold', required=False, help='Threshold in range 0-1. Fraction of maximum primer alignment score; primer sites with lower scores'
                                                       ' are labelled False',
               default=0.4, type=float, show_default=True)
 @click.option('--keep-temp', required=False, is_flag=True, flag_value=True, help='Keep temp files')
 @click.option('--regions', required=False, type=click.Path(exists=True), help='Target regions in bed form to perform biased mapping')
 @click.option('--bias', required=False, default=1.05, show_default=True, type=float, help='Multiply alignment score by bias if alignment falls within target regions')
-@click.option('--procs', required=False, default=1, show_default=True, help='Processors to use')
+@click.option('--procs', required=False, default=1, show_default=True, help='Number of processors to use')
 @click.option('--skip-alignment', required=False, is_flag=True, help='Skip alignment step')
-@click.option('--skip-interval-cluster', required=False, is_flag=True, help="Don't perform clustering.")
-@click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which queries won't be considered in the same cluster")
+@click.option('--skip-interval-cluster', required=False, is_flag=True, help='Skip clustering step')
+@click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster"")
 @click.option('--overlap', required=False, default=0.8, show_default=True, help="A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the start and end of the reads is identical.")
-@click.option('--n-alignmentdiff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction.')
-@click.option('--qlen-diff', default=0.05, required=False, show_default=True, help="Max difference in query length, Fraction.")
+@click.option('--n-alignmentdiff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
+@click.option('--qlen-diff', default=0.04, required=False, show_default=True, help="Max difference in query length. Fraction in the range 0-1.")
 @click.version_option(__version__)
 
 def pipeline(**args):
@@ -127,7 +127,20 @@ def pipeline(**args):
                                               f"{basename}.mappings.bed",
                                               args['regions'])
 
+            with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
+                fc.write('Filter counts:' + '\n')
+                fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
+                fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+
         if not args['skip_interval_cluster']:
+
+            filter_counts = manager.dict()
+            filter_counts['name'] = f'{args["name"]}_cluster'
+            filter_counts['total_kept'] = 0
+            filter_counts['total_dropped'] = 0
+            filter_counts['conactemers_dropped'] = 0
+            filter_counts['junk_seqs_dropped'] = 0
+            filter_counts['False_False'] = 0
 
             if not os.path.exists(args['out']):
                 os.mkdir(args['out'])
@@ -135,7 +148,6 @@ def pipeline(**args):
                 os.mkdir(f'{args["out"]}/cluster')
 
             print('Making clusters')
-            clustername = f'{args["out"]}/cluster/{args["name"]}'
             # read in bed file
             bed_file = pd.read_csv(f'{basename}.mappings.bed', sep='\t')
 
@@ -156,22 +168,25 @@ def pipeline(**args):
             subgraphs = cluster.get_subgraphs(network)
             subg_df = pd.DataFrame(subgraphs)
             subg_df = subg_df.T
-            subg_df.to_csv(f'{clustername}.cluster.qnames.csv', index=False)
+            # subg_df.to_csv(f'{clustername}.cluster.qnames.csv', index=False)
+            subg_long = pd.melt(subg_df, var_name='clusters', value_name='qname').dropna()
+            subg_long['clusters'] = pd.to_numeric(subg_long['clusters'], errors='coerce')
+            bed_file = bed_file.merge(subg_long, on='qname', how='left')
+            bed_file = bed_file.merge(filtered[['qname', 'qlen2']], on='qname', how='left')
+            bed_file.to_csv(f'{basename}.mappings.cluster.bed', index=False)
 
             print('Creating consensus sequences')
             if not os.path.exists(f'{args["out"]}/cluster/consensus_seq'):
                 os.mkdir(f'{args["out"]}/cluster/consensus_seq')
 
-            out = args["out"]
-            name = args["name"]
-            cluster.make_consensus_seq(subgraphs, bed_file, out, name)
+            cluster_specs = cluster.make_consensus_seq(subgraphs, bed_file, args["out"], args["name"], filtered)
 
-            cat = f'cat {args["out"]}/cluster/consensus_seq/*.fa > {args["out"]}/cluster/consensus_seq/{args["name"]}.cluster.consensus.fa'
+            cat = (f'cat {args["out"]}/cluster/consensus_seq/{args["name"]}.cluster*.size*.cons.fa > {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa ; rm -rf {args["out"]}/cluster/consensus_seq/')
             subprocess.run(cat, shell=True)
 
             # run the cons seqs through the pipeline again
-            print(f'Filtering reads: {args["out"]}/cluster/consensus_seq/{args["name"]}.cluster.consensus.fa', file=sys.stderr)
-            fs = glob.glob(f'{args["out"]}/cluster/consensus_seq/{args["name"]}.cluster.consensus.fa')
+            print(f'Filtering reads: {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa', file=sys.stderr)
+            fs = glob.glob(f'{args["out"]}/cluster/{args["name"]}.cluster.consensus.fa')
 
             jobs = []
             for pth in fs:
@@ -206,19 +221,54 @@ def pipeline(**args):
                 "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
                 "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
                 "samtools view -bh - |" \
-                "samtools sort -o {out}/cluster/{name}.bwa_dodi.bam; " \
-                "samtools index {out}/cluster/{name}.bwa_dodi.bam".format(bias_params=bias_params,
-                                                                          out=out, name = name,
+                "samtools sort -o {out}/cluster/{name}.bwa_dodi_cluster.bam; " \
+                "samtools index {out}/cluster/{name}.bwa_dodi_cluster.bam".format(bias_params=bias_params,
+                                                                          out=args['out'], name = args['name'],
                                                                           procs=args['procs'],
                                                                           ref=args['ref'])
 
             subprocess.run(d, shell=True)
 
+            # add to filter_counts
+            file_list = glob.glob(f'{basename}.filter_counts.csv')
+
+            if file_list:
+                # File exists, open it and append a new line
+                with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
+                    fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
+                    fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+            else:
+                # File does not exist, create it and add a new line
+                with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
+                    fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
+                    fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+
+            # add a summary file
+            summary = {}
+            summary['n_reads'] = len(bed_file['qname'].unique().tolist())
+            summary['n_reads_in_clutsers'] = len(bed_file.dropna(subset=["clusters"])['qname'].unique().tolist())
+            summary['p_reads_in_clusters'] = len(bed_file['qname'].unique().tolist()) / len(bed_file.dropna(subset=["clusters"])['qname'].unique().tolist())
+            summary['n_reads_after_clustering'] = len(bed_file['qname'].unique().tolist()) - len(bed_file.dropna(subset=["clusters"])['qname'].unique().tolist())
+            summary['n_clusters'] = cluster_specs.shape[0]
+            summary['n_pure_clusters'] = sum(cluster_specs['purity'].str.count('pure'))
+            summary['p_pure_clusters'] = sum(cluster_specs['purity'].str.count('pure')) / cluster_specs.shape[0]
 
 
 
-            with open(f'{args["out"]}/cluster/{args["name"]}.filter_counts.csv', 'w') as fc:
-                fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
-                fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+            with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
+                fc.write('Summary:' + '\n')
+                fc.write(','.join([str(k) for k in summary.keys()]) + '\n')
+                fc.write(','.join([str(k) for k in summary.values()]) + '\n')
+                fc.write('\n' + 'n_alignments_before_clustering' + '\n')
+                fc.write(pd.DataFrame(bed_file['n_alignments'].describe()).to_csv(index=True) + '\n')
+                fc.write(pd.DataFrame(bed_file['n_alignments'].value_counts()).transpose().to_csv(index=True) + '\n')
+                fc.write('cluster_n_alignments' + '\n')
+                fc.write(pd.DataFrame(cluster_specs['n_alignments_mean'].describe()).to_csv(index=True) + '\n')
+                fc.write(pd.DataFrame(cluster_specs['n_alignments_mean'].astype(int).value_counts()).transpose().to_csv(
+                index=True) + '\n')
+                fc.write('cluster_size' + '\n')
+                fc.write(pd.DataFrame(cluster_specs['size'].describe()).to_csv(index=True) + '\n')
+                fc.write(pd.DataFrame(cluster_specs['size'].value_counts()).transpose().to_csv(index=True) + '\n')
+                fc.write('* n_: number of *p_: proportion of' + '\n')
 
         print('fslr finished')
