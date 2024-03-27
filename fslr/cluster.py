@@ -8,7 +8,7 @@ def keep_fillings(bed_file):
     bed_file.sort_values(by=['qname', 'qstart'])
     unique_values = bed_file['qname'].unique()
 
-    filtered_df = bed_file
+    filtered_df = bed_file.copy()
 
     for value in unique_values:
         first_occurrence = filtered_df[filtered_df['qname'] == value].index[0]
@@ -160,9 +160,10 @@ def get_subgraphs(G):
     return sub_graphs
 
 
-def make_consensus_seq(subg, bed_file, out, name):
+def make_consensus_seq(subg, bed_file, out, name, filtered_bed_file):
     # make fasta files for each cluster -> use it to make a consensus sequence
-    num = 1
+    rows_list = []
+    num = 0
     for clust in subg:
         seq_df = bed_file[bed_file['qname'].isin(clust)].dropna(subset=['seq'])[['qname', 'seq']]
         size = len(clust)
@@ -190,7 +191,35 @@ def make_consensus_seq(subg, bed_file, out, name):
         > {out}/cluster/consensus_seq/{name}.cluster{num}.size{size}.cons.fa'
         subprocess.run(a, shell=True)
 
-        rm = f'rm {out}/cluster/consensus_seq/{name}.cluster{num}.size{size}.fa'
-        subprocess.run(rm, shell=True)
+        # df about the clusters
+        df = filtered_bed_file[filtered_bed_file['qname'].isin(clust)]
+        n_alignments = df['n_alignments'].mean()
+        qlen = df['qlen'].mean()
+        qlen2 = df['qlen2'].mean()
 
+        # add purity of the cluster
+        primer1 = df['qname'].str.contains('21q1').sum()
+        primer2 = df['qname'].str.contains('17p6').sum()
+        primer3 = df['qname'].str.contains('XpYpM').sum()
+        primer4 = df['qname'].str.contains('16p1').sum()
+        primer5 = df['qname'].str.contains('M613').sum()
+        primer6 = df['qname'].str.contains('M615').sum()
+        if primer1 == len(df) or primer2 == len(df) or primer3 == len(df) or primer4 == len(
+                df) or primer5 == len(df) or primer6 == len(df):
+            purity = "pure"
+        else:
+            purity = "not pure"
+
+        # add consensus sequence to the df
+        with open(f'{out}/cluster/consensus_seq/{name}.cluster{num}.size{size}.cons.fa', 'r') as f:
+            sequence = ""
+            for line in f:
+                if not line.startswith(">"):
+                    sequence += line.strip()
+
+        row = [num, size, n_alignments, qlen, qlen2, purity, sequence]
+        rows_list.append(row)
         num += 1
+    cluster_df = pd.DataFrame(rows_list, columns=['cluster', 'size', 'n_alignments_mean', 'qlen_mean', 'qlen2_mean', 'purity', 'cons_seq'])
+    cluster_df.to_csv(f'{out}/cluster/{name}.cluster.specifications.csv', index= False)
+    return cluster_df
