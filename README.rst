@@ -5,7 +5,7 @@ fslr
 Identify split-read alignments from a Fusion-Seq long read experiment.
 
 Table of contents
------
+-----------------
 
 - `Installation`_
 - `Usage`_
@@ -64,7 +64,7 @@ Skip alignment:
          --skip-alignment
 
 Options
------
+-------
 
 +---------------------------+------------------------------------------------------------------------------------------+
 | Option                    | Description                                                                              |
@@ -106,7 +106,7 @@ Options
 +---------------------------+------------------------------------------------------------------------------------------+
 
 Outputs
------
+-------
 Out folder:
 
     * .without_primers.fa: Contains sequences of reads without identifiable primers.
@@ -128,7 +128,7 @@ Out/cluster folder:
 
 
 How it works
-------
+------------
 
 1. Filter reads
 
