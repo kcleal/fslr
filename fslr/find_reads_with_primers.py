@@ -2,7 +2,6 @@ import os
 import pysam
 from collections import defaultdict
 from skbio.alignment import StripedSmithWaterman
-import sys
 
 ################################################
 # Label reads with the expected primer sequences

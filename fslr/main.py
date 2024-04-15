@@ -2,13 +2,14 @@ import click
 import pandas as pd
 import glob
 from fslr import filter_junk_from_fq, find_reads_with_primers, collect_mapping_info, cluster
+from fslr import make_ref_mask
 import multiprocessing
 import subprocess
 import sys
 import os
-import pkg_resources
+from importlib.metadata import version
 
-__version__ = pkg_resources.require("fslr")[0].version
+__version__ = version("fslr")
 file_path = os.path.dirname(os.path.realpath(__file__))
 
 
@@ -16,8 +17,8 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--name', required=True, help='Sample name')
 @click.option('--out', required=True, help='Output folder')
 @click.option('--ref', required=True, help='Reference genome')
-@click.option('--basecalled', required=False, help='Folder of basecalled reads in fastq format to analyse')
 @click.option('--primers', required=True, help='Comma-separated list of primer names. Make sure these are listed in primers.csv')
+@click.option('--basecalled', required=False, help='Folder of basecalled reads in fastq format to analyse')
 @click.option('--trim-threshold', required=False, help='Threshold in range 0-1. Fraction of maximum primer alignment score; primer sites with lower scores'
                                                       ' are labelled False',
               default=0.4, type=float, show_default=True)
@@ -25,6 +26,7 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--regions', required=False, type=click.Path(exists=True), help='Target regions in bed form to perform biased mapping')
 @click.option('--bias', required=False, default=1.05, show_default=True, type=float, help='Multiply alignment score by bias if alignment falls within target regions')
 @click.option('--procs', required=False, default=1, show_default=True, help='Number of processors to use')
+@click.option('--reference-mask', required=False, type=click.Path(exists=True), help='Target regions in bed form to create a masked reference. Reads are first aligned to the masked reference, prior to using the main reference')
 @click.option('--skip-alignment', required=False, is_flag=True, help='Skip alignment step')
 @click.option('--skip-interval-cluster', required=False, is_flag=True, help='Skip clustering step')
 @click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
@@ -32,7 +34,6 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--n-alignmentdiff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
 @click.option('--qlen-diff', default=0.04, required=False, show_default=True, help="Max difference in query length. Fraction in the range 0-1.")
 @click.version_option(__version__)
-
 def pipeline(**args):
 
     with multiprocessing.Manager() as manager:
@@ -69,6 +70,11 @@ def pipeline(**args):
 
         if not args['skip_alignment']:
 
+            mask_proc = None
+            if args['reference_mask']:
+                mask_proc = multiprocessing.Process(target=make_ref_mask.make_indexed_ref, args=(args['reference_mask'], basename, args['ref']))
+                mask_proc.start()
+
             print('Filtering reads: ', args['basecalled'], file=sys.stderr)
             fs = glob.glob(f'{args["basecalled"]}/*.fq.gz') + glob.glob(f'{args["basecalled"]}/*.fq') + glob.glob(
                                  f'{args["basecalled"]}/*.fastq.gz') + glob.glob(f'{args["basecalled"]}/*.fastq') + glob.glob(f'{args["basecalled"]}/*.fasta') \
@@ -104,15 +110,39 @@ def pipeline(**args):
             subprocess.run(f"cat {args['out']}/*.no_primers.fq > {basename}.without_primers.fq", shell=True)
             subprocess.run(f"rm {args['out']}/*.no_primers.fq", shell=True)
 
-            c = "cat {basename}.*.primers_labelled.fq | " \
-                "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
-                "samtools view -bh - |" \
-                "samtools sort -o {basename}.bwa_dodi.bam; " \
-                "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
-                                                                basename=basename,
-                                                                procs=args['procs'],
-                                                                ref=args['ref'])
+            if args['reference_mask']:
+                mask_proc.join()
+                # print(args['reference_mask'])
+                # make_ref_mask.make_indexed_ref(args['reference_mask'], basename, args['ref'])
+
+                c = "echo 'Mapping against masked reference first\n'; " \
+                    "cat {basename}.*.primers_labelled.fq | " \
+                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref!!} - | " \
+                    "samtools view -bh - | samtools sort -n -o {basename}/masked_mappings.bam - ;" \
+                    "cat {basename}.*.primers_labelled.fq | " \
+                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
+                    "samtools view -bh - | samtools sort -n -o {basename}/normal_mappings.bam - ;" \
+                    "samtools merge -f -O BAM -n -@{procs} {basename}/merged_mappings.bam {basename}/masked_mappings.bam {basename}/normal_mappings.bam;" \
+                    "samtools view {basename}/merged_mappings.bam | dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                    "samtools view -bh - |" \
+                    "samtools sort -o {basename}.bwa_dodi.bam; " \
+                    "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
+                                                                    basename=basename,
+                                                                    procs=args['procs'],
+                                                                    ref=args['ref'])
+
+                quit()
+
+            else:
+                c = "cat {basename}.*.primers_labelled.fq | " \
+                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
+                    "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                    "samtools view -bh - |" \
+                    "samtools sort -o {basename}.bwa_dodi.bam; " \
+                    "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
+                                                                    basename=basename,
+                                                                    procs=args['procs'],
+                                                                    ref=args['ref'])
 
             subprocess.run(c, shell=True)
 
@@ -125,7 +155,8 @@ def pipeline(**args):
 
             collect_mapping_info.mapping_info(f"{basename}.bwa_dodi.bam",
                                               f"{basename}.mappings.bed",
-                                              args['regions'])
+                                              args['regions'],
+                                              primers)
 
             with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
                 fc.write('Filter counts:' + '\n')
@@ -219,15 +250,16 @@ def pipeline(**args):
                 "samtools view -bh - |" \
                 "samtools sort -o {out}/cluster/{name}.bwa_dodi_cluster.bam; " \
                 "samtools view {out}/{name}.bwa_dodi.bam -b -h -o {out}/{name}.bwa_dodi_removed.bam -U {out}/{name}.bwa_dodi_unremoved.bam -L {out}/cluster/regions.bed; " \
-                "samtools merge -o {out}/{name}.bwa_dodi_cluster_merged.bam {out}/{name}.bwa_dodi_unremoved.bam {out}/cluster/{name}.bwa_dodi_cluster.bam; " \
+                "samtools merge -f -o {out}/{name}.bwa_dodi_cluster_merged.bam {out}/{name}.bwa_dodi_unremoved.bam {out}/cluster/{name}.bwa_dodi_cluster.bam; " \
                 "samtools index {out}/{name}.bwa_dodi_cluster_merged.bam".format(bias_params=bias_params,
                                                                                  out=args['out'],
-                                                                                 name = args['name'],
+                                                                                 name=args['name'],
                                                                                  procs=args['procs'],
                                                                                  ref=args['ref'])
 
             subprocess.run(d, shell=True)
-            subprocess.run(f'rm {args["out"]}/cluster/{args["name"]}.bwa_dodi_cluster.bam {args["out"]}/{args["name"]}.bwa_dodi_unremoved.bam {args["out"]}/{args["name"]}.bwa_dodi.bam {args["out"]}/{args["name"]}.bwa_dodi.bam.bai {args["out"]}/cluster/regions.bed', shell=True)
+            # Dont delete the original data - this is bad if fslr is run with --skip-alignment. the old data goes missing!
+            #subprocess.run(f'rm {args["out"]}/cluster/{args["name"]}.bwa_dodi_cluster.bam {args["out"]}/{args["name"]}.bwa_dodi_unremoved.bam {args["out"]}/{args["name"]}.bwa_dodi.bam {args["out"]}/{args["name"]}.bwa_dodi.bam.bai {args["out"]}/cluster/regions.bed', shell=True)
             # add to filter_counts
             file_list = glob.glob(f'{basename}.filter_counts_summary.csv')
 
