@@ -36,7 +36,7 @@ Normal usage:
     fslr --name samp1 \
          --out samp1_out \
          --ref T2T.fa \
-         --primers 21q1 \
+         --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16
 
@@ -45,7 +45,7 @@ Skip clustering:
     fslr --name samp1 \
          --out samp1_out \
          --ref T2T.fa \
-         --primers 21q1 \
+         --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16 \
          --skip-interval-cluster
@@ -107,24 +107,38 @@ Options
 
 Outputs
 -------
-Out folder:
+Normal usage
+::
+    Out folder:
 
-    * .without_primers.fa: Contains sequences of reads without identifiable primers.
-    * .primers_labelled.fq: Contains sequences of uniquely labelled reads that have at least one identified primer.
-    * .bwa_dodi.bam: A compressed binary file that contains the aligned sequences.
-    * .bwa_dodi.bai: Index file.
-    * .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
-    * .mappings.cluster.bed: The .mappings.bed file supplemented with information about the clusters.
-    * .filter_counts_summary.csv: Contains summary information about the filtered reads and the clusters.
+        .without_primers.fa: Contains sequences of reads without identifiable primers.
+        .primers_labelled.fq: Contains sequences of uniquely labelled reads that have at least one identified primer.
+        .mappings.cluster.bed: The .mappings.bed file supplemented with information about the clusters.
+        .bwa_dodi_cluster_merged.bam: A compressed binary file that contains the aligned sequences.
+        .bwa_dodi_cluster_merged.bai: Index file.
+        .filter_counts_summary.csv: Contains summary information about the filtered reads and the clusters.
 
-Out/cluster folder:
+    Out/cluster folder:
 
-    * .cluster.specifications.csv: A text file listing the identified clusters and their attributes.
-    * .cluster.consensus.fa: Consensus sequence of each cluster.
-    * .cluster.without_primers.fa: Consensus sequences without primers.
-    * .primers_labelled.fq: Uniquely labelled consensus sequences that have at least one identified primer.
-    * .bwa_dodi_cluster.bam: A compressed binary file that contains the aligned consensus sequences.
-    * .bwa_dodi_cluster.bai: Index file.
+        .cluster.specifications.csv: A text file listing the identified clusters and their attributes.
+        .cluster.consensus.fa: Consensus sequence of each cluster.
+        .cluster.without_primers.fa: Consensus sequences without primers.
+        .primers_labelled.fq: Uniquely labelled consensus sequences that have at least one identified primer.
+
+Skip clustering
+::
+
+    Out folder:
+        .without_primers.fa: Contains sequences of reads without identifiable primers.
+        .primers_labelled.fq: Contains sequences of uniquely labelled reads that have at least one identified primer.
+        .bwa_dodi.bam: A compressed binary file that contains the aligned sequences.
+        .bwa_dodi.bai: Index file.
+        .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
+
+
+
+
+
 
 
 How it works
@@ -141,3 +155,7 @@ How it works
 4. Cluster the reads:
 
     It works by constructing a graph based on the level of overlapping intervals and utilizing Jaccard-similarity measures. This step is needed to determine whether the alignments at a specific position come from different fusion events or if they actually come from the same event sequenced multiple times due to one single fusion event being amplified.
+
+5. Create consensus sequence from the reads in a cluster
+
+6. Re-align the consensus sequences

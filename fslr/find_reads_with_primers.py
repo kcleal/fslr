@@ -77,7 +77,7 @@ def check_primer2(primer_pairs, read, trim_thresh):
 
 
 def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
-    fq = pysam.FastqFile(pth)
+    fq = pysam.FastxFile(pth)
     primer_pairs = set([])
     for k1 in key_to_p:
         k1_forward = key_to_p[k1]
@@ -120,11 +120,16 @@ def label_and_chop_primers(pth, key_to_p, basename, trim_thresh):
 
 def func(args):
     path, key_to_p, lock, filter_counts, keep_temp, trim_thresh = args
-    basename = path.replace('.filtered_junk.fq', '')
-    counts, recs = label_and_chop_primers(f'{basename}.filtered_junk.fq', key_to_p, basename, trim_thresh)
-    for k, v in counts.items():
-        if k not in filter_counts:
-            filter_counts[k] = 0
-        filter_counts[k] += v
-    if not keep_temp:
-        os.remove(f'{basename}.filtered_junk.fq')
+    if 'filtered_junk' in path:
+        basename = path.replace('.filtered_junk.fq', '')
+        counts, recs = label_and_chop_primers(f'{basename}.filtered_junk.fq', key_to_p, basename, trim_thresh)
+        for k, v in counts.items():
+            if k not in filter_counts:
+                filter_counts[k] = 0
+            filter_counts[k] += v
+        if not keep_temp:
+            os.remove(f'{basename}.filtered_junk.fq')
+    else:
+        basename = path.replace('.fa', '')
+        counts, recs = label_and_chop_primers(path, key_to_p, basename, trim_thresh)
+
