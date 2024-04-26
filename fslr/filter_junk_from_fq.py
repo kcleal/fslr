@@ -137,7 +137,7 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
         else:
             concat = check_for_concatemer(seq, primer_list, primers, primers_r)
             if concat:
-                filter_counts['conactemers_dropped'] += 1
+                filter_counts['concatemers_dropped'] += 1
                 drop = True
 
         if not drop:
