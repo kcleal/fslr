@@ -286,8 +286,8 @@ def pipeline(**args):
             assert len(glob.glob(f"{basename}.bwa_dodi_merged.bam")) == 1
 
             collect_mapping_info.mapping_info(f"{basename}.bwa_dodi_merged.bam",
-                                            f"{basename}.mappings_merged.bed",
-                                              args['regions'])
+                                              f"{basename}.mappings_merged.bed",
+                                              args['regions'], primers)
 
 
             # add info about the clusters to the bed file
