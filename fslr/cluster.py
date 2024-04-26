@@ -3,6 +3,8 @@ from ncls import NCLS
 import networkx as nx
 import subprocess
 import click
+import pysam
+
 def keep_fillings(bed_file):
     # make a qlen2 column: qlen-len(bread)
     # Identify unique values in the specified column
@@ -68,21 +70,52 @@ def overall_jaccard_similarity(list1, list2, percentage):
     # Calculate overall intersection and union
     intersection = 0
     union = max(len(list1), len(list2))
-    for interval1 in list1:
-        for interval2 in list2:
-            # Check if intervals are on the same chromosome
-            if interval1[0] == interval2[0]:
-                if calculate_overlap(interval1, interval2) >= percentage:
-                    intersection += 1
+    if union == 0:
+        overall_jaccard_similarity = 0
+    else:
+        for interval1 in list1:
+            for interval2 in list2:
+                # Check if intervals are on the same chromosome
+                if interval1[0] == interval2[0]:
+                    if calculate_overlap(interval1, interval2) >= percentage:
+                        intersection += 1
 
     # Calculate overall Jaccard similarity
-    overall_jaccard_similarity = intersection / union
+        overall_jaccard_similarity = intersection / union
 
     return overall_jaccard_similarity
 
+def get_chromosome_lengths(bam_file):
+    chromosome_lengths = {}
+    command = ["samtools", "view", "-H", bam_file]
+    header = subprocess.check_output(command, universal_newlines=True)
+    for line in header.split('\n'):
+        if line.startswith('@SQ'):
+            fields = line.split('\t')
+            for field in fields:
+                if field.startswith('SN:'):
+                    chrom = field.split(':')[1]
+                elif field.startswith('LN:'):
+                    length = int(field.split(':')[1])
+            chromosome_lengths[chrom] = length
+    chromosome_lengths = {key: value for key, value in chromosome_lengths.items() if value > 1000000}
+    return chromosome_lengths
+
+def mask_sequences(read, mask, chromosome_lengths):
+    for e in mask:
+        delete = read['chrom'].str.contains(e)
+        read = read[~delete]
+    if 'subtelomere' in mask:
+        subtelomere = []
+        for index, row in read.iterrows():
+            chrom = row['chrom']
+            if row['rstart'] > (chromosome_lengths[chrom] - 500000) or row['rend'] < 500000:
+                subtelomere.add(index)
+        read = read.drop(subtelomere)
+    return read
 
 
-def query_interval_trees(interval_trees, bed, cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff):
+def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff, mask):
     # transform df to dictionary that has the qnames as keys
     query_dict = {}
     for index, row in bed[['qname', 'chrom', 'rstart', 'rend']].iterrows():
@@ -131,8 +164,13 @@ def query_interval_trees(interval_trees, bed, cutoff, jaccard_threshold, edge_th
                 # check if q, query_key are already in seen or not
                 if q != query_key and tuple(sorted((q, query_key))) not in seen_edges:
                     q1 = bed[bed['qname'] == query_key]
+                    # mask TALENs and subtelomeres in case n_alignments > 3
+                    if q1.iloc[0]['n_alignments'] > 3 and mask != None:
+                        q1 = mask_sequences(q1, mask, chromosome_lengths)
                     set1 = set(q1[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
                     q2 = bed[bed['qname'] == q]
+                    if q2.iloc[0]['n_alignments'] > 3 and mask != None:
+                        q2 = mask_sequences(q2, mask, chromosome_lengths)
                     set2 = set(q2[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
                     j = overall_jaccard_similarity(set1, set2, cutoff)
                     if j >= jaccard_threshold:
@@ -151,7 +189,6 @@ def query_interval_trees(interval_trees, bed, cutoff, jaccard_threshold, edge_th
 
     match_df = pd.DataFrame(match, columns=['query1', 'query2', 'jaccard_similarity'])
     return match_df, G, bad_list
-
 def get_subgraphs(G):
     # Identify groups of connected components (or subgraphs)
     sub_graphs = nx.connected_components(G)
@@ -187,12 +224,12 @@ def make_consensus_seq(subg, out, name, bed_file, primer_list):
                     fasta_file.write(f'{seq}\n')
 
         # create consensus sequence
-        a = f'abpoa {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.fa \
-        | sed "s/Consensus_sequence/cluster:{num}.n_reads:{n_reads}/g" \
-        > {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.cons.fa'
-        subprocess.run(a, shell=True)
-
-
+        a = (f'abpoa {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.fa ' \
+             f'| sed "s/Consensus_sequence/cluster:{num}.n_reads:{n_reads}/g" ' \
+             f'> {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.cons.fa')
+        # write stdout to a log file instead of the screen
+        with open(f"{out}/cluster/abpoa_logfile.txt", "a") as log_file:
+            subprocess.run(a, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
 
         # add consensus sequence to the df
         with open(f'{out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.cons.fa', 'r') as f:
@@ -203,21 +240,38 @@ def make_consensus_seq(subg, out, name, bed_file, primer_list):
 
         # df about the clusters
         df = bed_file[bed_file['qname'].isin(clust)]
-        n_alignments = df['n_alignments'].mean()
-        qlen = df['qlen'].mean()
+
 
         # add purity of the cluster
-        row = [num, n_reads, n_alignments, qlen]
+        row = [num, n_reads]
         for p in primer_list:
-            row.append(df['qname'].str.contains(p).sum()/df.shape[0])
+            row.append((df['qname'].str.contains(p).sum()/df.shape[0]))
 
         row.append(sequence)
         rows_list.append(row)
         num += 1
 
-    col = ['cluster', 'n_reads', 'n_alignments_mean', 'qlen_mean']
+    col = ['cluster', 'n_reads']
     col.extend(primer_list)
     col.append('cons_seq')
     cluster_df = pd.DataFrame(rows_list, columns=col)
-    cluster_df.to_csv(f'{out}/cluster/{name}.cluster.specifications.csv', index= False)
-    return cluster_df
+    cluster_df.to_csv(f'{out}/cluster/{name}.cluster.purity.csv', index= False)
+
+def delete_alignments(input_bam, output_bam, alignments_to_delete):
+    with pysam.AlignmentFile(input_bam, "rb") as infile:
+        header = infile.header
+        with pysam.AlignmentFile(output_bam, "wb", header=header) as outfile:
+            for alignment in infile:
+                # Check if the alignment's query name is in the list of names to delete
+                if alignment.query_name not in alignments_to_delete:
+                    outfile.write(alignment)
+
+def merge_bam_files(input_bam1, input_bam2, output_bam):
+    with pysam.AlignmentFile(output_bam, "wb", header=pysam.AlignmentFile(input_bam1, "rb").header) as outfile:
+        with pysam.AlignmentFile(input_bam1, "rb") as infile1, pysam.AlignmentFile(input_bam2, "rb") as infile2:
+            for alignment in infile1:
+                outfile.write(alignment)
+            for alignment in infile2:
+                outfile.write(alignment)
+
+
