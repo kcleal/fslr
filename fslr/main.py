@@ -48,7 +48,7 @@ def pipeline(**args):
         filter_counts['name'] = args['name']
         filter_counts['total_kept'] = 0
         filter_counts['total_dropped'] = 0
-        filter_counts['conactemers_dropped'] = 0
+        filter_counts['concatemers_dropped'] = 0
         filter_counts['junk_seqs_dropped'] = 0
         filter_counts['False_False'] = 0
 
@@ -170,7 +170,7 @@ def pipeline(**args):
             filter_counts['name'] = f'{args["name"]}_cluster'
             filter_counts['total_kept'] = 0
             filter_counts['total_dropped'] = 0
-            filter_counts['conactemers_dropped'] = 0
+            filter_counts['concatemers_dropped'] = 0
             filter_counts['junk_seqs_dropped'] = 0
             filter_counts['False_False'] = 0
 
