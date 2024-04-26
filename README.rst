@@ -30,7 +30,7 @@ Install using::
 
 Usage
 -----
-Normal usage:
+Default usage:
 ::
 
     fslr --name samp1 \
@@ -39,6 +39,7 @@ Normal usage:
          --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16
+         --mask subtelomere,TALEN
 
 Skip clustering:
 ::
@@ -48,11 +49,11 @@ Skip clustering:
          --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16 \
-         --skip-interval-cluster
+         --skip-clustering
 
 Skip alignment:
 
-    To skip the alignment step a [name].mappings.bed file is needed in the output folder.
+    To skip the alignment step a [name].mappings.bed, [name].bwa_dodi.bam file is needed in the output folder.
 
 ::
 
@@ -61,7 +62,8 @@ Skip alignment:
          --ref T2T.fa \
          --primers 21q1 \
          --procs 16 \
-         --skip-alignment
+         --skip-alignment \
+         --mask subtelomere,TALEN
 
 Options
 -------
@@ -104,58 +106,77 @@ Options
 +---------------------------+------------------------------------------------------------------------------------------+
 | `--qlen-diff`             | Max difference in query length. Fraction in the range 0-1.                               |
 +---------------------------+------------------------------------------------------------------------------------------+
+| `--mask`                  | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
+|                           | subtemoleric regions, TALEN.                                                             |
++---------------------------+------------------------------------------------------------------------------------------+
 
 Outputs
 -------
-Normal usage
-::
-    Out folder:
+Default usage
+=============
 
-        .without_primers.fa: Contains sequences of reads without identifiable primers.
-        .primers_labelled.fq: Contains sequences of uniquely labelled reads that have at least one identified primer.
-        .mappings.cluster.bed: The .mappings.bed file supplemented with information about the clusters.
-        .bwa_dodi_cluster_merged.bam: A compressed binary file that contains the aligned sequences.
-        .bwa_dodi_cluster_merged.bai: Index file.
-        .filter_counts_summary.csv: Contains summary information about the filtered reads and the clusters.
+Out folder:
 
-    Out/cluster folder:
+* .without_primers.fq: Contains sequences of reads without identifiable primers.
+* .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
+* .mappings.cluster.bed: Contains the same information about the reads as .mappings.bed with two additional columns; cluster and n_reads. The cluster column stores the cluster id-s of the reads. The n_reads column shows the number of reads within a cluster.
+* .mappings_merged.bed: This file contains genomic regions of all the "singletons" from the initial alignment and the re-aligned consensus sequences.
+* .bwa_dodi.bam: Alignment file after the initial alignment step.
+* .bwa_dodi_cluster_merged.bam: Alignment file containing the "singletons" and the consensus sequences.
+* .bai: Index files.
+* .filter_counts_summary.csv: Contains information about the filtered reads.
 
-        .cluster.specifications.csv: A text file listing the identified clusters and their attributes.
-        .cluster.consensus.fa: Consensus sequence of each cluster.
-        .cluster.without_primers.fa: Consensus sequences without primers.
-        .primers_labelled.fq: Uniquely labelled consensus sequences that have at least one identified primer.
+Out/cluster folder:
+
+* .cluster.consensus.fa: Consensus sequences of each cluster.
+* .cluster.without_primers.fq: Consensus sequences without an identified primer.
+* abpoa_logfile.txt: Messages (standard output) created by abPOA while generating the consensus sequences.
+* .cluster.purity.csv: List the cluster id-s, the number of reads within a cluster, the consensus sequences and the proportion of reads within a cluster that have a specific primer.
 
 Skip clustering
-::
+===============
 
-    Out folder:
-        .without_primers.fa: Contains sequences of reads without identifiable primers.
-        .primers_labelled.fq: Contains sequences of uniquely labelled reads that have at least one identified primer.
-        .bwa_dodi.bam: A compressed binary file that contains the aligned sequences.
-        .bwa_dodi.bai: Index file.
-        .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
+Out folder:
 
-
-
-
+* .without_primers.fa: Contains sequences of reads without identifiable primers.
+* .bwa_dodi.bam: A compressed binary file that contains the aligned reads.
+* .bwa_dodi.bai: Index file.
+* .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
 
 
 
 How it works
 ------------
 
-1. Filter reads
+1. Filter reads:
 
-    Remove repetitive sequences, junk sequences and concatemers
+    Remove repetitive sequences, junk sequences and concatemers from the input files.
 
-2. Find reads with primers
+2. Find reads with primers:
 
-3. Align to the reference genome and choose the best alignments
+    Identify primers at the end of the reads and exclude any read from further analysis that doesn't have at least one
+    primer at one end. The result of 1. and 2. is summarised in [name].filter_counts_summary.csv.
+
+3. Align to the reference genome and choose the best alignments:
+
+    Reads are aligned to the user specified reference genome using bwa mem. Out of the possible alignments the best are
+    then selected using dodi.
+    A BAM and BED file is saved at this stage; [name].bwa_dodi.bam, [name].mappings.bed.
 
 4. Cluster the reads:
 
-    It works by constructing a graph based on the level of overlapping intervals and utilizing Jaccard-similarity measures. This step is needed to determine whether the alignments at a specific position come from different fusion events or if they actually come from the same event sequenced multiple times due to one single fusion event being amplified.
+    The purpose of the clustering step is to identify highly similar reads that are potentially the result of the same
+    event getting amplified prior to the sequencing.
+    It works by constructing a graph based on the level of overlapping intervals and utilizing Jaccard-similarity
+    measures.
+    A [name].mappings.cluster.bed file is created that shows which reads and alignments are in the same cluster.
 
-5. Create consensus sequence from the reads in a cluster
+5. Create a consensus sequence from the reads in a cluster:
 
-6. Re-align the consensus sequences
+    In this step a consensus sequence is created for each cluster using abPOA.
+    It produces the [name].cluster.consensus.fa output file in the out/cluster folder.
+
+6. Re-align the consensus sequences:
+
+    At this stage the consensus sequences go through steps 1. 2. and 3. again producing the final
+    [name].bwa_dodi_cluster_merged.bam, [name].bwa_dodi_cluster_merged.bai, and [name].mappings_merged.bed files.
