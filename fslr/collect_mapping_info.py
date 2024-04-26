@@ -1,8 +1,7 @@
 import pysam 
 import pandas as pd
-import sys
 from collections import defaultdict
-import pkg_resources
+from importlib.metadata import version
 
 
 def get_query_pos_from_cigartuples(r):
@@ -17,8 +16,8 @@ def get_query_pos_from_cigartuples(r):
     return start, end, query_length
 
 
-def mapping_info(f, outf, regions_path):
-    flsr_version = pkg_resources.get_distribution("fslr").version
+def mapping_info(f, outf, regions_path, primers):
+    flsr_version = version("fslr")
 
     af = pysam.AlignmentFile(f, 'r')
     d = defaultdict(list)
@@ -52,6 +51,8 @@ def mapping_info(f, outf, regions_path):
         seq = pri_read.get_forward_sequence()
         n_aligns = len(v)
         any_seq = False
+
+        temp = []
         for index, a in enumerate(v):
             qstart, qend, qlen = get_query_pos_from_cigartuples(a)
             align_reverse = bool(a.flag & 16)
@@ -89,16 +90,74 @@ def mapping_info(f, outf, regions_path):
                  'alignment_score': a.get_tag('AS'),
                  'seq': seq if pri else '',
                  'fslr_version': flsr_version,
+                 'inferred_by_primer': 0,
                  }
 
             if regions:
                 rd['overlaps_region'] = overlaps
 
-            res.append(rd)
+            temp.append(rd)
 
         if not any_seq:
             print('missing', qname, [(len(vv.seq), vv.infer_query_length()) if vv.seq else vv.infer_query_length() for vv in v])
             quit()
+
+        if len(temp) > 1:
+            res += temp
+            continue
+
+        # Add in inferred alignments at the ends 'missing bread'
+        temp = sorted(temp, key=lambda r: r['qstart'])
+        qstart_gap = temp[0]['qstart']
+        qend_gap = temp[0]['qlen'] - temp[0]['qend']
+        p_names = temp[0]['qname'].split('.')[-1].split('_')
+        p1, p2 = [i.rstrip('FR') for i in p_names]
+
+        if qstart_gap > 5 and qend_gap > 5:  # gaps at both ends, skip these
+            res += temp
+            continue
+        # This was considered but deemed unnecessary as primers have already been identified
+        # != 'False' and len(primers[p2]):
+        if p1 != 'False':
+            temp[0]['n_alignments'] = 2
+            p1_rd = {'qname': temp[0]['qname'],
+                     'n_alignments': 2,
+                     'chrom': p1,
+                     'rstart': 0,
+                     'rend': 0,
+                     'strand': '-' if p_names[0][-1] == "R" else '+',
+                     'qstart': 0,
+                     'qend': len(primers[p1]),
+                     'qlen': qlen,
+                     'aln_size': 0,
+                     'mapq': 0,
+                     'alignment_score': 0,
+                     'seq': '',
+                     'fslr_version': flsr_version,
+                     'inferred_by_primer': 1,
+                     }
+            temp = [p1_rd, temp[0]]
+        elif p2 != 'False':
+            temp[0]['n_alignments'] = 2
+            p2_rd = {'qname': temp[0]['qname'],
+                     'n_alignments': 2,
+                     'chrom': p2,
+                     'rstart': 0,
+                     'rend': 0,
+                     'strand': '-' if p_names[1][-1] == "R" else '+',
+                     'qstart': qlen - len(primers[p2]),
+                     'qend': qlen,
+                     'qlen': qlen,
+                     'aln_size': 0,
+                     'mapq': 0,
+                     'alignment_score': 0,
+                     'seq': '',
+                     'fslr_version': flsr_version,
+                     'inferred_by_primer': 1,
+                     }
+            temp = [temp[0], p2_rd]
+
+        res += temp
 
     df = pd.DataFrame.from_records(res).sort_values(['qname', 'qstart'])
 
@@ -115,7 +174,7 @@ def mapping_info(f, outf, regions_path):
     df = df.sort_values(['n_alignments', 'qname', 'qstart'], ascending=[False, True, True])
 
     cols = ['chrom', 'rstart', 'rend', 'qname', 'n_alignments', 'aln_size', 'qstart', 'qend', 'strand', 'mapq', 'qlen',
-             'alignment_score', 'short_anchor<50bp', 'fslr_version', 'seq']
+             'alignment_score', 'short_anchor<50bp', 'fslr_version', 'inferred_by_primer', 'seq']
     if regions:
         cols.append('overlaps_region')
     df = df[cols]
