@@ -26,7 +26,7 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--regions', required=False, type=click.Path(exists=True), help='Target regions in bed form to perform biased mapping')
 @click.option('--bias', required=False, default=1.05, show_default=True, type=float, help='Multiply alignment score by bias if alignment falls within target regions')
 @click.option('--procs', required=False, default=1, show_default=True, help='Number of processors to use')
-@click.option('--reference-mask', required=False, type=click.Path(exists=True), help='Target regions in bed form to create a masked reference. Reads are first aligned to the masked reference, prior to using the main reference')
+@click.option('--reference-mask', required=False, type=click.Path(exists=True), help='A bed file containing target regions for creating a masked reference. Reads are first aligned to the masked reference, prior to using the main reference')
 @click.option('--skip-alignment', required=False, is_flag=True, help='Skip alignment step')
 @click.option('--skip-clustering', required=False, is_flag=True, help='Skip clustering step')
 @click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
@@ -37,7 +37,7 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.version_option(__version__)
 def pipeline(**args):
 
-    with multiprocessing.Manager() as manager:
+    with (multiprocessing.Manager() as manager):
 
         lock = manager.Lock()
 
@@ -72,8 +72,9 @@ def pipeline(**args):
         if not args['skip_alignment']:
 
             mask_proc = None
+            masked_ref_path = f'{basename}_temp_ref.fa'
             if args['reference_mask']:
-                mask_proc = multiprocessing.Process(target=make_ref_mask.make_indexed_ref, args=(args['reference_mask'], basename, args['ref']))
+                mask_proc = multiprocessing.Process(target=make_ref_mask.make_indexed_ref, args=(args['reference_mask'], masked_ref_path, args['ref']))
                 mask_proc.start()
 
             print('Filtering reads: ', args['basecalled'], file=sys.stderr)
@@ -105,7 +106,6 @@ def pipeline(**args):
                 for j in jobs:
                     find_reads_with_primers.func(j)
 
-
             print('Filter counts: ', filter_counts, file=sys.stderr)
 
             subprocess.run(f"cat {args['out']}/*.no_primers.fq > {basename}.without_primers.fq", shell=True)
@@ -113,26 +113,31 @@ def pipeline(**args):
 
             if args['reference_mask']:
                 mask_proc.join()
-                # print(args['reference_mask'])
-                # make_ref_mask.make_indexed_ref(args['reference_mask'], basename, args['ref'])
+                print(f"Mapping against masked reference defined by {args['reference_mask']}", file=sys.stderr)
+                c1 = f"cat {basename}.*.primers_labelled.fq | " \
+                     f"bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{args['procs']} {masked_ref_path} - | " \
+                     f"samtools view -bh - | samtools sort -n -o {basename}_masked_mappings.bam - ;"
+                subprocess.run(c1, shell=True)
 
-                c = "echo 'Mapping against masked reference first\n'; " \
-                    "cat {basename}.*.primers_labelled.fq | " \
-                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref!!} - | " \
-                    "samtools view -bh - | samtools sort -n -o {basename}/masked_mappings.bam - ;" \
-                    "cat {basename}.*.primers_labelled.fq | " \
-                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                    "samtools view -bh - | samtools sort -n -o {basename}/normal_mappings.bam - ;" \
-                    "samtools merge -f -O BAM -n -@{procs} {basename}/merged_mappings.bam {basename}/masked_mappings.bam {basename}/normal_mappings.bam;" \
-                    "samtools view {basename}/merged_mappings.bam | dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
-                    "samtools view -bh - |" \
-                    "samtools sort -o {basename}.bwa_dodi.bam; " \
-                    "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
-                                                                    basename=basename,
-                                                                    procs=args['procs'],
-                                                                    ref=args['ref'])
+                print(f"Mapping against whole reference {args['ref']}", file=sys.stderr)
+                c2 = f"cat {basename}.*.primers_labelled.fq | " \
+                     f"bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{args['procs']} {args['ref']} - |" \
+                     f"samtools view -bh - | samtools sort -n -o {basename}_normal_mappings.bam - ;"
+                subprocess.run(c2, shell=True)
 
-                quit()
+                print('Processing masked and whole reference mappings', file=sys.stderr)
+                c3 = f"samtools merge -f -O BAM -n -@{args['procs']} {basename}_merged_mappings.bam {basename}_masked_mappings.bam {basename}_normal_mappings.bam;" \
+                     f"samtools view -h {basename}_merged_mappings.bam | dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                     f"samtools view -bh - |" \
+                     f"samtools sort -o {basename}.bwa_dodi.bam; " \
+                     f"samtools index {basename}.bwa_dodi.bam"
+                subprocess.run(c3, shell=True)
+
+                if not args['keep_temp']:
+                    [os.remove(i) for i in glob.glob(f'{basename}_temp_ref.fa*')]
+                    os.remove(f'{basename}_masked_mappings.bam')
+                    os.remove(f'{basename}_normal_mappings.bam')
+                    os.remove(f'{basename}_merged_mappings.bam')
 
             else:
                 c = "cat {basename}.*.primers_labelled.fq | " \
@@ -144,8 +149,7 @@ def pipeline(**args):
                                                                     basename=basename,
                                                                     procs=args['procs'],
                                                                     ref=args['ref'])
-
-            subprocess.run(c, shell=True)
+                subprocess.run(c, shell=True)
 
             if not args['keep_temp']:
                 pass

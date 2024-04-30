@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="fslr",
-    version='0.3.1',
+    version='0.3.2',
     license='MIT',
     python_requires='>=3.7',
     install_requires=[

@@ -180,3 +180,19 @@ How it works
 
     At this stage the consensus sequences go through steps 1. 2. and 3. again producing the final
     [name].bwa_dodi_cluster_merged.bam, [name].bwa_dodi_cluster_merged.bai, and [name].mappings_merged.bed files.
+
+
+Reference masking and biased alignments
+---------------------------------------
+
+A bed file can be added using the --reference-mask option. These regions will be used to
+create a masked reference where regions outside bed regions will be converted to N's.
+
+Reads will be mapped to the masked reference, in addition to the main reference. All mappings will then
+be subsequently processed by dodi do obtain the final set of alignments per read.
+
+Note, currently only one region per chromosome is supported when using --reference-mask option.
+
+Biased mapping is also supported by supplying a bed file using the --regions option. Alignments that overlap a target
+region will have a bias added to their alignment scores during processing with dodi, making them more likely
+to be chosen as a final output alignment. Output alignments retain their original alignment scores.
