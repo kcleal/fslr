@@ -14,6 +14,6 @@ def make_indexed_ref(mask_bed, outname, current_ref):
             start = int(line[1])
             end = int(line[2])
             if start > 0:
-                ref.write('N'*start)
+                ref.write('N'*(start-1))
             ref.write(current_ref.fetch(line[0], start, end))
     run(f'bwa index {outname}', shell=True)
