@@ -4,6 +4,21 @@ import networkx as nx
 import subprocess
 import click
 import pysam
+import time
+from functools import wraps
+
+
+def measure_time(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f"Execution time of {func.__name__}: {execution_time} seconds")
+        return result
+
+    return wrapper
 
 def keep_fillings(bed_file):
     # make a qlen2 column: qlen-len(bread)
@@ -48,6 +63,7 @@ def build_interval_trees(bed_df):
         interval_trees[chrom] = tree
     return interval_trees
 
+# filter intervals that don't overlap at least as much as the user input value
 def filter_overlap(overlaps, percentage, query_start, query_end):
     filtered_overlaps = set([])
     interval = [i for i in overlaps]
@@ -63,9 +79,6 @@ def calculate_overlap(interval1, interval2):
     percent = len_1 / len_2
     return percent
 
-# calculates jacc. sim. between 2 queries ("sandwiches")
-# how many of the reads in the 2 queries overlap - intersection
-# union - the number of fillings in the bigger query
 def overall_jaccard_similarity(list1, list2, percentage):
     # Calculate overall intersection and union
     intersection = 0
@@ -85,6 +98,7 @@ def overall_jaccard_similarity(list1, list2, percentage):
 
     return overall_jaccard_similarity
 
+# get chromosome length from the header of the alignment file -> find subtelomere regions
 def get_chromosome_lengths(bam_file):
     chromosome_lengths = {}
     command = ["samtools", "view", "-H", bam_file]
@@ -102,19 +116,24 @@ def get_chromosome_lengths(bam_file):
     return chromosome_lengths
 
 def mask_sequences(read, mask, chromosome_lengths):
-    for e in mask:
-        delete = read['chrom'].str.contains(e)
-        read = read[~delete]
-    if 'subtelomere' in mask:
-        subtelomere = []
-        for index, row in read.iterrows():
-            chrom = row['chrom']
-            if row['rstart'] > (chromosome_lengths[chrom] - 500000) or row['rend'] < 500000:
-                subtelomere.add(index)
-        read = read.drop(subtelomere)
+
+    mask_set = set(mask)
+
+    # Filter out rows based on mask
+    delete = read['chrom'].str.contains('|'.join(mask_set))
+    read = read[~delete]
+
+    # Check for subtelomere in mask
+    if 'subtelomere' in mask_set:
+        subtelomere = (
+                (read['chrom'].isin(chromosome_lengths.keys())) &
+                ((read['rstart'] > (read['chrom'].map(chromosome_lengths) - 500000)) |
+                 (read['rend'] < 500000))
+        )
+        read = read[~subtelomere]
     return read
 
-
+@measure_time
 def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff, mask):
     # transform df to dictionary that has the qnames as keys
     query_dict = {}
@@ -129,11 +148,13 @@ def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccar
     match = set([])  # these will be added to the graph
     edges = 0
     bad_list = set([]) # too big qlen difference, too big alignment number difference, too low jaccard similarity
+    # loop through the reads
     for query_key, query_values in query_dict.items():
+        # loop through the alignments within the reads
         for chr_value, start_value, end_value, index in query_values:
-            tree = interval_trees[chr_value]
-            overlaps = tree.find_overlap(start_value, end_value)
-            # filter for qlen2
+            tree = interval_trees[chr_value] # get the interval tree
+            overlaps = tree.find_overlap(start_value, end_value) # find overlapping intervals
+            # filter for qlen2 (qlen2 = the length of the fillings)
             overlaps2 = set([])
             overlap_intervals = [o for o in overlaps]
             for o in overlap_intervals:
@@ -143,11 +164,11 @@ def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccar
                     overlaps2.add(o)
                 else:
                     bad = bed.loc[o[2], 'qname']
-                    bad_list.add(tuple(sorted((bad, query_key)))) # qname pairs where qlen was too different
+                    bad_list.add(tuple(sorted((bad, query_key)))) # qname pairs where qlen2 was too different
                     seen_edges.add(tuple(sorted((bad, query_key))))
-
+            # only keep intervals that overlap above a specified threshold
             filtered_overlap = filter_overlap(overlaps2, cutoff, start_value, end_value)
-
+            # check the difference between the number of alignments
             filtered_overlap2 = set([])
             for aln in filtered_overlap:
                 alignment_num = bed.loc[aln, 'n_alignments']
@@ -158,21 +179,26 @@ def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccar
                     bad = bed.loc[aln, 'qname']
                     bad_list.add(tuple(sorted((bad, query_key))))
                     seen_edges.add(tuple(sorted((bad, query_key))))
+            # retrieve the query names of reads that passed
             query_name_of_overlaps = bed.loc[list(filtered_overlap2), 'qname']
-
+            # loop through these qnames
             for q in query_name_of_overlaps:
                 # check if q, query_key are already in seen or not
                 if q != query_key and tuple(sorted((q, query_key))) not in seen_edges:
-                    q1 = bed[bed['qname'] == query_key]
-                    # mask TALENs and subtelomeres in case n_alignments > 3
-                    if q1.iloc[0]['n_alignments'] > 3 and mask != None:
-                        q1 = mask_sequences(q1, mask, chromosome_lengths)
+                    # mask regions in case n_alignments > 3
+                    if bed[bed['qname'] == query_key].iloc[0]['n_alignments'] > 3 and mask != None:
+                        q1 = mask_sequences(bed[bed['qname'] == query_key], mask, chromosome_lengths)
+                    else:
+                        q1 = bed[bed['qname'] == query_key]
                     set1 = set(q1[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
-                    q2 = bed[bed['qname'] == q]
-                    if q2.iloc[0]['n_alignments'] > 3 and mask != None:
-                        q2 = mask_sequences(q2, mask, chromosome_lengths)
+                    if bed[bed['qname'] == query_key].iloc[0]['n_alignments'] > 3 and mask != None:
+                        q2 = mask_sequences(bed[bed['qname'] == query_key], mask, chromosome_lengths)
+                    else:
+                        q2 = bed[bed['qname'] == query_key]
                     set2 = set(q2[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
+                    # calculate jaccard sim. between each read
                     j = overall_jaccard_similarity(set1, set2, cutoff)
+                    # check if jaccard sim. is above the threshold and add to the graph if it is
                     if j >= jaccard_threshold:
                         match.add((query_key, q, j))
                         G.add_node(q)
@@ -189,6 +215,7 @@ def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccar
 
     match_df = pd.DataFrame(match, columns=['query1', 'query2', 'jaccard_similarity'])
     return match_df, G, bad_list
+
 def get_subgraphs(G):
     # Identify groups of connected components (or subgraphs)
     sub_graphs = nx.connected_components(G)
@@ -196,82 +223,32 @@ def get_subgraphs(G):
     sub_graphs = list(sub_graphs)
 
     return sub_graphs
+@measure_time
+def choose_alignment(bed_file):
+    # calculate average alignment scores for each read
+    qname_grouped = bed_file.groupby('qname')
+    avg_scores = qname_grouped['alignment_score'].mean()
+
+    # Map the average alignment scores back to the bed_file using qname
+    bed_file['avg_alignment_score'] = bed_file['qname'].map(avg_scores)
+
+    # Group reads by cluster identifier
+    cluster_grouped = bed_file.groupby('cluster')
+
+    # list to store reads with highest score in each cluster
+    selected_reads = []
+
+    for cluster_id, group in cluster_grouped:
+        # Find the read with the highest average alignment score in the cluster
+        max_alignment_read = group.loc[group['avg_alignment_score'].idxmax()]['qname']
+        selected_reads.append(max_alignment_read)
+
+    selected_reads_df = bed_file[bed_file['qname'].isin(selected_reads)]
+
+    return selected_reads_df
 
 
-def make_consensus_seq(subg, out, name, bed_file, primer_list):
-    # make fasta files for each cluster -> use it to make a consensus sequence
-    rows_list = []
-    num = 0
-    for clust in subg:
-        seq_df = bed_file[bed_file['qname'].isin(clust)].dropna(subset=['seq'])[['qname', 'seq']]
-        n_reads = len(clust)
-        # Open the file for writing
-        fasta_file_path = f'{out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.fa'
-        with open(fasta_file_path, 'w') as fasta_file:
-            # Get the total number of rows in seq_df
-            total_rows = seq_df.shape[0]
-            # Iterate through DataFrame rows and write to the FASTA file
-            for index, row in seq_df.iterrows():
-                qname = row['qname']
-                seq = row['seq']
-                # Write sequence header
-                fasta_file.write(f'>{qname}\n')
-                # Write sequence data without trailing newline if it's the last row
-                if index == total_rows - 1:
-                    fasta_file.write(f'{seq}')
-                else:
-                    # Write sequence data with newline for non-last rows
-                    fasta_file.write(f'{seq}\n')
-
-        # create consensus sequence
-        a = (f'abpoa {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.fa ' \
-             f'| sed "s/Consensus_sequence/cluster:{num}.n_reads:{n_reads}/g" ' \
-             f'> {out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.cons.fa')
-        # write stdout to a log file instead of the screen
-        with open(f"{out}/cluster/abpoa_logfile.txt", "a") as log_file:
-            subprocess.run(a, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
-
-        # add consensus sequence to the df
-        with open(f'{out}/cluster/consensus_seq/{name}.cluster{num}.n_reads{n_reads}.cons.fa', 'r') as f:
-            sequence = ""
-            for line in f:
-                if not line.startswith(">"):
-                    sequence += line.strip()
-
-        # df about the clusters
-        df = bed_file[bed_file['qname'].isin(clust)]
 
 
-        # add purity of the cluster
-        row = [num, n_reads]
-        for p in primer_list:
-            row.append((df['qname'].str.contains(p).sum()/df.shape[0]))
-
-        row.append(sequence)
-        rows_list.append(row)
-        num += 1
-
-    col = ['cluster', 'n_reads']
-    col.extend(primer_list)
-    col.append('cons_seq')
-    cluster_df = pd.DataFrame(rows_list, columns=col)
-    cluster_df.to_csv(f'{out}/cluster/{name}.cluster.purity.csv', index= False)
-
-def delete_alignments(input_bam, output_bam, alignments_to_delete):
-    with pysam.AlignmentFile(input_bam, "rb") as infile:
-        header = infile.header
-        with pysam.AlignmentFile(output_bam, "wb", header=header) as outfile:
-            for alignment in infile:
-                # Check if the alignment's query name is in the list of names to delete
-                if alignment.query_name not in alignments_to_delete:
-                    outfile.write(alignment)
-
-def merge_bam_files(input_bam1, input_bam2, output_bam):
-    with pysam.AlignmentFile(output_bam, "wb", header=pysam.AlignmentFile(input_bam1, "rb").header) as outfile:
-        with pysam.AlignmentFile(input_bam1, "rb") as infile1, pysam.AlignmentFile(input_bam2, "rb") as infile2:
-            for alignment in infile1:
-                outfile.write(alignment)
-            for alignment in infile2:
-                outfile.write(alignment)
 
 

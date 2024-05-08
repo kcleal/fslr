@@ -171,15 +171,11 @@ How it works
     measures.
     A [name].mappings.cluster.bed file is created that shows which reads and alignments are in the same cluster.
 
-5. Create a consensus sequence from the reads in a cluster:
+5. Choose a representative read for each cluster:
 
-    In this step a consensus sequence is created for each cluster using abPOA.
-    It produces the [name].cluster.consensus.fa output file in the out/cluster folder.
+    Calculate an average alignment score for each read. Choose a representative read in each cluster with the highest
+    average alignment score.
 
-6. Re-align the consensus sequences:
-
-    At this stage the consensus sequences go through steps 1. 2. and 3. again producing the final
-    [name].bwa_dodi_cluster_merged.bam, [name].bwa_dodi_cluster_merged.bai, and [name].mappings_merged.bed files.
 
 
 Reference masking and biased alignments
