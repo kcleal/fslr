@@ -84,6 +84,8 @@ def pipeline(**args):
 
             jobs = []
             for pth in fs:
+                if os.path.getsize(pth) == 0:
+                    raise ValueError(f"The file '{pth}' is empty.")
                 jobs.append((pth, primers, args['out'], args['name'], filter_counts, lock, args['keep_temp']))
             if args['procs'] > 1:
                 with multiprocessing.Pool(args['procs']) as p:
@@ -96,6 +98,8 @@ def pipeline(**args):
 
             jobs = []
             for pth in glob.glob(f'{args["out"]}/*filtered_junk.fq'):
+                if os.path.getsize(pth) == 0:
+                    raise ValueError(f"The file '{pth}' is empty.")
                 jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp'], args['trim_threshold']))
             if args['procs'] > 1:
                 with multiprocessing.Pool(args['procs']) as p:
@@ -175,15 +179,30 @@ def pipeline(**args):
             filter_counts['False_False'] = 0
 
 
-
-            if not os.path.exists(args['out']):
-                os.mkdir(args['out'])
-            if not os.path.exists(f'{args["out"]}/cluster'):
-                os.mkdir(f'{args["out"]}/cluster')
+            # if not os.path.exists(args['out']):
+            #     os.mkdir(args['out'])
+            # if not os.path.exists(f'{args["out"]}/cluster'):
+            #     os.mkdir(f'{args["out"]}/cluster')
 
             print('Making clusters')
             # read in bed file
             bed_file = pd.read_csv(f'{basename}.mappings.bed', sep='\t')
+
+
+            mask = set(args['mask'].split(',')) if args['mask'] is not None else None
+
+            # Check if mask values are not in the 'chrom' column
+            not_valid = mask.difference(bed_file['chrom'])
+            not_valid.discard('telomere')
+
+            # If there are values in not_valid, print them
+            if not_valid:
+                print("The following values can't be used as a mask:")
+                for value in not_valid:
+                    print(value)
+                mask.discard(not_valid)
+
+
 
             # arguments
             jaccard_cutoff = args['jaccard_cutoff']
@@ -216,78 +235,78 @@ def pipeline(**args):
             n_reads = subg_long['cluster'].value_counts().rename('n_reads')
             subg_long_reads = pd.merge(subg_long, n_reads, on='cluster')
 
-            print('Creating consensus sequences')
-            if not os.path.exists(f'{args["out"]}/cluster/consensus_seq'):
-                os.mkdir(f'{args["out"]}/cluster/consensus_seq')
-
-            primer = args['primers']
-            primer = [value.strip() for value in primer]
-            cluster.make_consensus_seq(subgraphs, args["out"], args["name"], bed_file, primer)
-
-            cat = (f'cat {args["out"]}/cluster/consensus_seq/{args["name"]}.cluster*.n_reads*.cons.fa > {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa ; rm -rf {args["out"]}/cluster/consensus_seq/')
-            subprocess.run(cat, shell=True)
-
-            # run the cons seqs through the pipeline again
-            print(f'Filtering reads: {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa', file=sys.stderr)
-
-            fs = glob.glob(f'{args["out"]}/cluster/{args["name"]}.cluster.consensus.fa')
-
-            jobs = []
-            for pth in fs:
-                jobs.append((pth, primers, f'{args["out"]}/cluster', args['name'], filter_counts, lock, args['keep_temp']))
-            if args['procs'] > 1:
-                with multiprocessing.Pool(args['procs']) as p:
-                    p.map(filter_junk_from_fq.func, jobs)
-            else:
-                for j in jobs:
-                    filter_junk_from_fq.func(j)
-
-            jobs = []
-            for pth in glob.glob(f'{args["out"]}/cluster/*filtered_junk.fq'):
-                jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp'], args['trim_threshold']))
-            if args['procs'] > 1:
-                with multiprocessing.Pool(args['procs']) as p:
-                    p.map(find_reads_with_primers.func, jobs)
-            else:
-                for j in jobs:
-                    find_reads_with_primers.func(j)
-
-            print('Filter counts: ', filter_counts, file=sys.stderr)
-
-            subprocess.run(f'cat {args["out"]}/cluster/*.no_primers.fq > {args["out"]}/cluster/{args["name"]}.cons.without_primers.fq', shell=True)
-            subprocess.run(f'rm {args["out"]}/cluster/*.no_primers.fq', shell=True)
-
-            d = "cat {out}/cluster/*.primers_labelled.fq | " \
-                "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
-                "samtools view -bh - |" \
-                "samtools sort -o {out}/{name}.bwa_dodi_cons.bam".format(bias_params=bias_params,
-                                                                          out=args['out'],
-                                                                          name = args['name'],
-                                                                          procs=args['procs'],
-                                                                          ref=args['ref'])
-
-            subprocess.run(d, shell=True)
-            # select qnames from the bam file to delete
-            qnames = set(bed_file[bed_file['qname'].isin(subg_long_reads['qname'])]['qname'])
-            cluster.delete_alignments(f"{basename}.bwa_dodi.bam",f"{basename}.bwa_dodi_delete.bam", qnames)
-            cluster.merge_bam_files( f"{basename}.bwa_dodi_delete.bam",f"{basename}.bwa_dodi_cons.bam", f"{basename}.bwa_dodi_merged.bam")
-
-            s = "samtools sort -o {out}/{name}.bwa_dodi_merged.bam {out}/{name}.bwa_dodi_merged.bam;" \
-                "samtools index {out}/{name}.bwa_dodi_merged.bam".format(out=args['out'], name=args['name'])
-            subprocess.run(s, shell=True)
-
-            if not args['keep_temp']:
-                pass
-                pth = glob.glob(f"{args['out']}/cluster/{args['name']}.*.primers_labelled.fq") + glob.glob(f"{basename}.bwa_dodi_delete.bam") + glob.glob(f"{basename}.bwa_dodi_cons.bam")
-                for pl in pth:
-                    os.remove(pl)
-
-            assert len(glob.glob(f"{basename}.bwa_dodi_merged.bam")) == 1
-
-            collect_mapping_info.mapping_info(f"{basename}.bwa_dodi_merged.bam",
-                                            f"{basename}.mappings_merged.bed",
-                                              args['regions'])
+            # print('Creating consensus sequences')
+            # if not os.path.exists(f'{args["out"]}/cluster/consensus_seq'):
+            #     os.mkdir(f'{args["out"]}/cluster/consensus_seq')
+            #
+            # primer = args['primers']
+            # primer = [value.strip() for value in primer]
+            # cluster.make_consensus_seq(subgraphs, args["out"], args["name"], bed_file, primer)
+            #
+            # cat = (f'cat {args["out"]}/cluster/consensus_seq/{args["name"]}.cluster*.n_reads*.cons.fa > {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa ; rm -rf {args["out"]}/cluster/consensus_seq/')
+            # subprocess.run(cat, shell=True)
+            #
+            # # run the cons seqs through the pipeline again
+            # print(f'Filtering reads: {args["out"]}/cluster/{args["name"]}.cluster.consensus.fa', file=sys.stderr)
+            #
+            # fs = glob.glob(f'{args["out"]}/cluster/{args["name"]}.cluster.consensus.fa')
+            #
+            # jobs = []
+            # for pth in fs:
+            #     jobs.append((pth, primers, f'{args["out"]}/cluster', args['name'], filter_counts, lock, args['keep_temp']))
+            # if args['procs'] > 1:
+            #     with multiprocessing.Pool(args['procs']) as p:
+            #         p.map(filter_junk_from_fq.func, jobs)
+            # else:
+            #     for j in jobs:
+            #         filter_junk_from_fq.func(j)
+            #
+            # jobs = []
+            # for pth in glob.glob(f'{args["out"]}/cluster/*filtered_junk.fq'):
+            #     jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp'], args['trim_threshold']))
+            # if args['procs'] > 1:
+            #     with multiprocessing.Pool(args['procs']) as p:
+            #         p.map(find_reads_with_primers.func, jobs)
+            # else:
+            #     for j in jobs:
+            #         find_reads_with_primers.func(j)
+            #
+            # print('Filter counts: ', filter_counts, file=sys.stderr)
+            #
+            # subprocess.run(f'cat {args["out"]}/cluster/*.no_primers.fq > {args["out"]}/cluster/{args["name"]}.cons.without_primers.fq', shell=True)
+            # subprocess.run(f'rm {args["out"]}/cluster/*.no_primers.fq', shell=True)
+            #
+            # d = "cat {out}/cluster/*.primers_labelled.fq | " \
+            #     "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
+            #     "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+            #     "samtools view -bh - |" \
+            #     "samtools sort -o {out}/{name}.bwa_dodi_cons.bam".format(bias_params=bias_params,
+            #                                                               out=args['out'],
+            #                                                               name = args['name'],
+            #                                                               procs=args['procs'],
+            #                                                               ref=args['ref'])
+            #
+            # subprocess.run(d, shell=True)
+            # # select qnames from the bam file to delete
+            # qnames = set(bed_file[bed_file['qname'].isin(subg_long_reads['qname'])]['qname'])
+            # cluster.delete_alignments(f"{basename}.bwa_dodi.bam",f"{basename}.bwa_dodi_delete.bam", qnames)
+            # cluster.merge_bam_files( f"{basename}.bwa_dodi_delete.bam",f"{basename}.bwa_dodi_cons.bam", f"{basename}.bwa_dodi_merged.bam")
+            #
+            # s = "samtools sort -o {out}/{name}.bwa_dodi_merged.bam {out}/{name}.bwa_dodi_merged.bam;" \
+            #     "samtools index {out}/{name}.bwa_dodi_merged.bam".format(out=args['out'], name=args['name'])
+            # subprocess.run(s, shell=True)
+            #
+            # if not args['keep_temp']:
+            #     pass
+            #     pth = glob.glob(f"{args['out']}/cluster/{args['name']}.*.primers_labelled.fq") + glob.glob(f"{basename}.bwa_dodi_delete.bam") + glob.glob(f"{basename}.bwa_dodi_cons.bam")
+            #     for pl in pth:
+            #         os.remove(pl)
+            #
+            # assert len(glob.glob(f"{basename}.bwa_dodi_merged.bam")) == 1
+            #
+            # collect_mapping_info.mapping_info(f"{basename}.bwa_dodi_merged.bam",
+            #                                 f"{basename}.mappings_merged.bed",
+            #                                   args['regions'])
 
 
             # add info about the clusters to the bed file
@@ -303,22 +322,25 @@ def pipeline(**args):
 
             bed_file.to_csv(f'{basename}.mappings.cluster.bed', index=False, sep='\t')
 
-            # add to filter_counts
-            file_list = glob.glob(f'{basename}.filter_counts_summary.csv')
+            bed_representative = cluster.choose_alignment(bed_file)
+            bed_representative.to_csv(f'{basename}.mappings.representative.bed', index=False, sep='\t')
 
-            if file_list:
-                # File exists, open it and append a new line
-                with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
-                    fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
-            else:
-                # File does not exist, create it and add a new line
-                with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
-                    fc.write('Filter counts:' + '\n')
-                    fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
-                    fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+            # # add to filter_counts
+            # file_list = glob.glob(f'{basename}.filter_counts_summary.csv')
 
-            # need to add a summary file
-            with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
-                fc.write('Summary:' + '\n')
+            # if file_list:
+            #     # File exists, open it and append a new line
+            #     with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
+            #         fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+            # else:
+            #     # File does not exist, create it and add a new line
+            #     with open(f'{basename}.filter_counts_summary.csv', 'w') as fc:
+            #         fc.write('Filter counts:' + '\n')
+            #         fc.write(','.join([str(k) for k in filter_counts.keys()]) + '\n')
+            #         fc.write(','.join([str(k) for k in filter_counts.values()]) + '\n')
+            #
+            # # need to add a summary file
+            # with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
+            #     fc.write('Summary:' + '\n')
 
         print('fslr finished')
