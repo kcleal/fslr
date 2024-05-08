@@ -39,7 +39,7 @@ Default usage:
          --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16
-         --mask subtelomere,L1_TALEN
+         --mask subtelomere,TALEN
 
 Skip clustering:
 ::
@@ -63,7 +63,7 @@ Skip alignment:
          --primers 21q1 \
          --procs 16 \
          --skip-alignment \
-         --mask subtelomere,L1_TALEN
+         --mask subtelomere,TALEN
 
 Options
 -------
@@ -107,7 +107,7 @@ Options
 | `--qlen-diff`             | Max difference in query length. Fraction in the range 0-1.                               |
 +---------------------------+------------------------------------------------------------------------------------------+
 | `--mask`                  | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
-|                           | subtemoleric regions, L1_TALEN. Use the name as it appears in the alignment file.        |
+|                           | subtemoleric regions, TALEN.                                                             |
 +---------------------------+------------------------------------------------------------------------------------------+
 
 Outputs
@@ -120,10 +120,18 @@ Out folder:
 * .without_primers.fq: Contains sequences of reads without identifiable primers.
 * .mappings.bed: A text file that stores genomic regions as coordinates associated with the split-reads.
 * .mappings.cluster.bed: Contains the same information about the reads as .mappings.bed with two additional columns; cluster and n_reads. The cluster column stores the cluster id-s of the reads. The n_reads column shows the number of reads within a cluster.
-* .mappings_representative.bed: This file contains genomic regions of all the "singletons" from the initial alignment and a representative read for each cluster.
+* .mappings_merged.bed: This file contains genomic regions of all the "singletons" from the initial alignment and the re-aligned consensus sequences.
 * .bwa_dodi.bam: Alignment file after the initial alignment step.
+* .bwa_dodi_cluster_merged.bam: Alignment file containing the "singletons" and the consensus sequences.
 * .bai: Index files.
 * .filter_counts_summary.csv: Contains information about the filtered reads.
+
+Out/cluster folder:
+
+* .cluster.consensus.fa: Consensus sequences of each cluster.
+* .cluster.without_primers.fq: Consensus sequences without an identified primer.
+* abpoa_logfile.txt: Messages (standard output) created by abPOA while generating the consensus sequences.
+* .cluster.purity.csv: List the cluster id-s, the number of reads within a cluster, the consensus sequences and the proportion of reads within a cluster that have a specific primer.
 
 Skip clustering
 ===============
@@ -163,9 +171,12 @@ How it works
     measures.
     A [name].mappings.cluster.bed file is created that shows which reads and alignments are in the same cluster.
 
-5. Choose representative reads:
+5. Create a consensus sequence from the reads in a cluster:
 
-    For each read calculate an average alignment score. Choose the read with the highest average alignment score as
-    a representative read for that cluster.
+    In this step a consensus sequence is created for each cluster using abPOA.
+    It produces the [name].cluster.consensus.fa output file in the out/cluster folder.
 
+6. Re-align the consensus sequences:
 
+    At this stage the consensus sequences go through steps 1. 2. and 3. again producing the final
+    [name].bwa_dodi_cluster_merged.bam, [name].bwa_dodi_cluster_merged.bai, and [name].mappings_merged.bed files.

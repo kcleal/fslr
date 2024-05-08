@@ -2,10 +2,10 @@ import pysam
 from subprocess import run
 import sys
 
-def make_indexed_ref(mask_bed, basename, current_ref):
+def make_indexed_ref(mask_bed, outname, current_ref):
     current_ref = pysam.FastaFile(current_ref)
-    print(f'Making masked reference genome {basename}_temp_ref.fa', file=sys.stderr)
-    with open(mask_bed) as f, open(basename + '_temp_ref.fa', 'w') as ref:
+    print(f'Making masked reference genome {outname}', file=sys.stderr)
+    with open(mask_bed) as f, open(outname, 'w') as ref:
         for line in f:
             if line.startswith('#'):
                 continue
@@ -14,6 +14,6 @@ def make_indexed_ref(mask_bed, basename, current_ref):
             start = int(line[1])
             end = int(line[2])
             if start > 0:
-                ref.write('N'*start)
+                ref.write('N'*(start-1))
             ref.write(current_ref.fetch(line[0], start, end))
-    run(f'bwa index {basename}_temp_ref.fa', shell=True)
+    run(f'bwa index {outname}', shell=True)
