@@ -31,9 +31,9 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--skip-clustering', required=False, is_flag=True, help='Skip clustering step')
 @click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
 @click.option('--overlap', required=False, default=0.8, show_default=True, help="A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the start and end of the reads is identical.")
-@click.option('--n-alignmentdiff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
+@click.option('--n-alignment-diff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
 @click.option('--qlen-diff', default=0.04, required=False, show_default=True, help="Max difference in query length. Fraction in the range 0-1.")
-@click.option('--mask', default=None, required=False, show_default=True, help="Comma separated list of regions/chromosomes to be excluded from the clustering e.g.: subtemoleric regions, TALEN")
+@click.option('--cluster-mask', default='subtelomere', required=False, show_default=True, help="Comma separated list of chromosome names to be excluded from the clustering. Use 'subtelomere' to exclude alignments within 500kb of telomere end")
 @click.version_option(__version__)
 def pipeline(**args):
 
@@ -192,29 +192,19 @@ def pipeline(**args):
             # read in bed file
             bed_file = pd.read_csv(f'{basename}.mappings.bed', sep='\t')
 
-
-            mask = set(args['mask'].split(',')) if args['mask'] is not None else None
-
-            # Check if mask values are not in the 'chrom' column
-            not_valid = mask.difference(bed_file['chrom'])
-            not_valid.discard('telomere')
-
-            # If there are values in not_valid, print them
-            if not_valid:
-                print("The following values can't be used as a mask:")
-                for value in not_valid:
-                    print(value)
-                mask.discard(not_valid)
-
-
+            chromosome_mask = set([])
+            if args['cluster_mask']:
+                allowed = set(bed_file['chrom'])
+                for item in args['cluster_mask'].split(','):
+                    if item in allowed or item == 'subtelomere':
+                        chromosome_mask.add(item)
 
             # arguments
             jaccard_cutoff = args['jaccard_cutoff']
             overlap = args['overlap']
             edge_threshold = 3
             qlen_diff = args['qlen_diff']
-            n_alignments_diff = args['n_alignmentdiff']
-            mask = args['mask'].split(',')
+            n_alignments_diff = args['n_alignment_diff']
 
             chr_lengths = cluster.get_chromosome_lengths(f'{basename}.bwa_dodi.bam')
             # delete the "breads", make qlen2 column == qlen without the breads
@@ -222,11 +212,11 @@ def pipeline(**args):
             # build interval trees for each chr
             interval_tree = cluster.build_interval_trees(filtered)
             # find queries that are similar and add them to a graph
-            match_data, network, no_match = cluster.query_interval_trees(interval_tree, filtered, chr_lengths, overlap, jaccard_cutoff, edge_threshold, qlen_diff, n_alignments_diff, mask)
+            match_data, network, no_match = cluster.query_interval_trees(interval_tree, filtered, chr_lengths, overlap, jaccard_cutoff, edge_threshold, qlen_diff, n_alignments_diff, chromosome_mask)
             # extract the subgraphs from the network
             subgraphs = cluster.get_subgraphs(network)
 
-            #don't continue if 0 clusters were found
+            # don't continue if 0 clusters were found
             if len(list(subgraphs)) == network.number_of_nodes():
                 print("No clusters were found.")
                 return

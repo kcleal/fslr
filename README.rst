@@ -39,7 +39,7 @@ Default usage:
          --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16
-         --mask subtelomere,TALEN
+         --cluster-mask subtelomere,L1_TALEN
 
 Skip clustering:
 ::
@@ -63,7 +63,7 @@ Skip alignment:
          --primers 21q1 \
          --procs 16 \
          --skip-alignment \
-         --mask subtelomere,TALEN
+         --cluster-mask subtelomere,L1_TALEN
 
 Options
 -------
@@ -102,12 +102,12 @@ Options
 | `--overlap`               | A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the   |
 |                           | start and end of the reads is identical.                                                 |
 +---------------------------+------------------------------------------------------------------------------------------+
-| `--n-alignmentdiff`       | How much the number of alignments in one cluster can differ. Fraction in the range 0-1.  |
+| `--n-alignment-diff`       | How much the number of alignments in one cluster can differ. Fraction in the range 0-1.  |
 +---------------------------+------------------------------------------------------------------------------------------+
 | `--qlen-diff`             | Max difference in query length. Fraction in the range 0-1.                               |
 +---------------------------+------------------------------------------------------------------------------------------+
-| `--mask`                  | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
-|                           | subtemoleric regions, TALEN.                                                             |
+| `--cluster-mask`          | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
+|                           | subtemoleric regions, L1_TALEN.                                                             |
 +---------------------------+------------------------------------------------------------------------------------------+
 
 Outputs
