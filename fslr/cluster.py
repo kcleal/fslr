@@ -165,8 +165,8 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                     continue
 
                 list2 = query_intervals[o_data.qname]
-                j, union = overall_jaccard_similarity(list1, list2, overlap_cutoff)
-                target = jaccard_threshold[union] if union < len(jaccard_threshold) else jaccard_threshold[-1]
+                j, n_intersections = overall_jaccard_similarity(list1, list2, overlap_cutoff)
+                target = jaccard_threshold[n_intersections] if n_intersections < len(jaccard_threshold) else jaccard_threshold[-1]
                 if j >= target:
                     match.add((query_key, o_data.qname, j))
                     G.add_edge(query_key, o_data.qname)
