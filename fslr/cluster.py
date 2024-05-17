@@ -112,7 +112,6 @@ def overall_jaccard_similarity(l1, l2, percentage=0.8):
     if not l1 or not l2:
         return 0
     intersection = 0
-    # union = max(len(list1), len(list2)) this is not the set union!
     l1_comparisons = [0] * len(l1)
     l2_comparisons = [0] * len(l2)  # 0 for no intersection, 1 for an intersection
     for i, interval1 in enumerate(l1):
@@ -126,7 +125,7 @@ def overall_jaccard_similarity(l1, l2, percentage=0.8):
     union = intersections + l1_comparisons.count(0) + l2_comparisons.count(0)
     if not union:
         return 0
-    return intersections / union, union
+    return intersections / union, intersections
 
 
 def get_chromosome_lengths(bam_path):
