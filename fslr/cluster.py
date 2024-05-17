@@ -69,7 +69,7 @@ def prepare_data(bed_df, cluster_mask, chromosome_lengths, threshold=500_000):
     # need to make sure rend > rstart for sortedintersect, and intervals are sorted
     bed_df['start'] = np.minimum(bed_df['rstart'], bed_df['rend'])
     bed_df['end'] = np.maximum(bed_df['rstart'], bed_df['rend'])
-    bed_df.sort_values('start', inplace=True)
+    bed_df = bed_df.sort_values('start')
     columns = ['chrom', 'start', 'end', 'qname', 'n_alignments', 'qlen2']
     data = []
     for i in zip(*(bed_df[col] for col in columns), bed_df.index):
@@ -161,8 +161,10 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                     continue
 
                 list2 = query_intervals[o_data.qname]
-                j, n_intersections = overall_jaccard_similarity(list1, list2, overlap_cutoff)
-                target = jaccard_threshold[n_intersections] if n_intersections < len(jaccard_threshold) else jaccard_threshold[-1]
+                j, n_i = overall_jaccard_similarity(list1, list2, overlap_cutoff)
+                if n_i == 0:
+                    continue
+                target = jaccard_threshold[n_i - 1] if n_i - 1 < len(jaccard_threshold) else jaccard_threshold[-1]
                 if j >= target:
                     match.add((query_key, o_data.qname, j))
                     G.add_edge(query_key, o_data.qname)

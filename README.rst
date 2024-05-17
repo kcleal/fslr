@@ -96,8 +96,8 @@ Options
 +---------------------------+------------------------------------------------------------------------------------------+
 | `--skip-interval-cluster` | Skip clustering step.                                                                    |
 +---------------------------+------------------------------------------------------------------------------------------+
-| `--jaccard-cutoff`        | Jaccard similarity index, a number between 0-1, below which reads won't be considered in |
-|                           | the same cluster.                                                                        |
+| `--jaccard-cutoffs`       | Comma-separated list of Jaccard similarity thresholds for N-1 intersections e.g. where   |
+|                           | index=0 corresponds to one the threshold for 1 intersection.                                                                        |
 +---------------------------+------------------------------------------------------------------------------------------+
 | `--overlap`               | A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the   |
 |                           | start and end of the reads is identical.                                                 |

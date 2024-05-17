@@ -12,16 +12,14 @@ from importlib.metadata import version
 __version__ = version("fslr")
 file_path = os.path.dirname(os.path.realpath(__file__))
 
-
+# jaccard_cutoff = [1, 1, 2/3, 3/4, 3/5, 3/6]
 @click.command()
 @click.option('--name', required=True, help='Sample name')
 @click.option('--out', required=True, help='Output folder')
 @click.option('--ref', required=True, help='Reference genome')
 @click.option('--primers', required=True, help='Comma-separated list of primer names. Make sure these are listed in primers.csv')
 @click.option('--basecalled', required=False, help='Folder of basecalled reads in fastq format to analyse')
-@click.option('--trim-threshold', required=False, help='Threshold in range 0-1. Fraction of maximum primer alignment score; primer sites with lower scores'
-                                                      ' are labelled False',
-              default=0.4, type=float, show_default=True)
+@click.option('--trim-threshold', required=False, help='Threshold in range 0-1. Fraction of maximum primer alignment score; primer sites with lower scores are labelled False', default=0.4, type=float, show_default=True)
 @click.option('--keep-temp', required=False, is_flag=True, flag_value=True, help='Keep temp files')
 @click.option('--regions', required=False, type=click.Path(exists=True), help='Target regions in bed form to perform biased mapping')
 @click.option('--bias', required=False, default=1.05, show_default=True, type=float, help='Multiply alignment score by bias if alignment falls within target regions')
@@ -29,7 +27,8 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--reference-mask', required=False, type=click.Path(exists=True), help='A bed file containing target regions for creating a masked reference. Reads are first aligned to the masked reference, prior to using the main reference')
 @click.option('--skip-alignment', required=False, is_flag=True, help='Skip alignment step')
 @click.option('--skip-clustering', required=False, is_flag=True, help='Skip clustering step')
-@click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
+#@click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
+@click.option('--jaccard-cutoffs', required=False, default='1,1,0.66,0.66,0.66,0.5', show_default=True, help="Comma-separated list of Jaccard similarity thresholds for N-1 intersections e.g. where index=0 corresponds to one the threshold for 1 intersection.")
 @click.option('--overlap', required=False, default=0.8, show_default=True, help="A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the start and end of the reads is identical.")
 @click.option('--n-alignment-diff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
 @click.option('--qlen-diff', default=0.04, required=False, show_default=True, help="Max difference in query length. Fraction in the range 0-1.")
@@ -95,7 +94,6 @@ def pipeline(**args):
             else:
                 for j in jobs:
                     filter_junk_from_fq.func(j)
-
 
             jobs = []
             for pth in glob.glob(f'{args["out"]}/*filtered_junk.fq'):
@@ -199,9 +197,7 @@ def pipeline(**args):
                     if item in allowed or item == 'subtelomere':
                         chromosome_mask.add(item)
 
-            # arguments
-            #jaccard_cutoff = args['jaccard_cutoff']
-            jaccard_cutoff = [1, 1, 2/3, 3/4, 3/5, 3/6]
+            jaccard_cutoffs = [float(i) for i in args['jaccard_cutoffs'].split(',')]
             overlap = args['overlap']
             edge_threshold = 10
             qlen_diff = args['qlen_diff']
@@ -215,7 +211,7 @@ def pipeline(**args):
             interval_tree = cluster.build_interval_trees(data)
 
             # find queries that are similar and add them to a graph
-            match_data, network = cluster.query_interval_trees(interval_tree, data, overlap, jaccard_cutoff, edge_threshold, qlen_diff, n_alignments_diff)
+            match_data, network = cluster.query_interval_trees(interval_tree, data, overlap, jaccard_cutoffs, edge_threshold, qlen_diff, n_alignments_diff)
             # extract the subgraphs from the network
             subgraphs = cluster.get_subgraphs(network)
 
