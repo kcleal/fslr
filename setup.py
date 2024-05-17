@@ -14,6 +14,7 @@ setup(
             'networkx',
             'pafpy',
             'pysam',
+            'sortedintersect'
         ],
     packages=find_packages(where="."),
     package_data={'': ['primers.csv']},

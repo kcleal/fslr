@@ -1,13 +1,9 @@
 import pandas as pd
-from ncls import NCLS
 import networkx as nx
-import subprocess
-import click
 import numpy as np
 import pysam
 import time
 from functools import wraps
-import sortedcontainers
 from sortedintersect import IntervalSet
 from collections import defaultdict, namedtuple
 
