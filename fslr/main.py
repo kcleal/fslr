@@ -200,19 +200,22 @@ def pipeline(**args):
                         chromosome_mask.add(item)
 
             # arguments
-            jaccard_cutoff = args['jaccard_cutoff']
+            #jaccard_cutoff = args['jaccard_cutoff']
+            jaccard_cutoff = [1, 1, 2/3, 3/4, 3/5, 3/6]
             overlap = args['overlap']
-            edge_threshold = 3
+            edge_threshold = 10
             qlen_diff = args['qlen_diff']
             n_alignments_diff = args['n_alignment_diff']
 
             chr_lengths = cluster.get_chromosome_lengths(f'{basename}.bwa_dodi.bam')
             # delete the "breads", make qlen2 column == qlen without the breads
-            filtered = cluster.keep_fillings(bed_file)
-            # build interval trees for each chr
-            interval_tree = cluster.build_interval_trees(filtered)
+            fillings = cluster.keep_fillings(bed_file)
+
+            data = cluster.prepare_data(fillings, chromosome_mask, chr_lengths, threshold=500_000)
+            interval_tree = cluster.build_interval_trees(data)
+
             # find queries that are similar and add them to a graph
-            match_data, network, no_match = cluster.query_interval_trees(interval_tree, filtered, chr_lengths, overlap, jaccard_cutoff, edge_threshold, qlen_diff, n_alignments_diff, chromosome_mask)
+            match_data, network = cluster.query_interval_trees(interval_tree, data, overlap, jaccard_cutoff, edge_threshold, qlen_diff, n_alignments_diff)
             # extract the subgraphs from the network
             subgraphs = cluster.get_subgraphs(network)
 
