@@ -354,4 +354,4 @@ def pipeline(**args):
             # with open(f'{basename}.filter_counts_summary.csv', 'a') as fc:
             #     fc.write('Summary:' + '\n')
 
-
+        print('fslr finished')
