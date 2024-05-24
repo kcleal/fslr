@@ -52,8 +52,6 @@ def mask_sequences2(read_alignments, mask, chromosome_lengths, threshold=500_000
             if a.start < threshold or (
                     a.chrom in chromosome_lengths and chromosome_lengths[a.chrom] - a.end < threshold):
                 continue
-            mask.remove('subtelomere')
-            mask = [chromosome_to_numeric(chromosome) for chromosome in mask]
         if a.chrom in mask:
             continue
         new_alignments.append(a)
@@ -94,7 +92,6 @@ def calculate_overlap(interval1, interval2):
 def overall_jaccard_similarity_optimized(l1, l2, l1_comparisons, l2_comparisons, percentage, min_threshold):
     if not l1 or not l2:
         return 0, 0
-    l2_matched = set()
     len1 = len(l1)
     len2 = len(l2)
     len_product = len1 * len2
@@ -108,11 +105,7 @@ def overall_jaccard_similarity_optimized(l1, l2, l1_comparisons, l2_comparisons,
             count += 1
             if l2_comparisons[j]:
                 continue
-            if j in l2_matched:
-                continue
-
             if interval1.chrom == interval2.chrom and calculate_overlap(interval1, interval2) >= percentage:
-                l2_matched.add(j)
                 l1_comparisons[i] = 1
                 l2_comparisons[j] = 1
                 intersection += 1

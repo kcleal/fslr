@@ -200,6 +200,8 @@ def pipeline(**args):
                     if item in allowed or item == 'subtelomere':
                         chromosome_mask.add(item)
 
+
+
             jaccard_cutoffs = [float(i) for i in args['jaccard_cutoffs'].split(',')]
             overlap = args['overlap']
             edge_threshold = 10
@@ -208,11 +210,10 @@ def pipeline(**args):
 
             chr_lengths = cluster.get_chromosome_lengths(f'{basename}.bwa_dodi.bam')
 
-            chromosome_names = sorted(set(chr_lengths.keys()),
+            chromosome_names = sorted(set(bed_file['chrom']),
                                       key=lambda x: int(x[3:]) if x[3:].isdigit() else float('inf'))
 
             chromosome_to_numeric_map = {name: i + 1 for i, name in enumerate(chromosome_names)}
-
             def chromosome_to_numeric(chromosome):
                 return chromosome_to_numeric_map.get(chromosome, -1)
 
@@ -220,6 +221,7 @@ def pipeline(**args):
 
             bed_file['chrom'] = bed_file['chrom'].apply(chromosome_to_numeric)
 
+            chromosome_mask = [chromosome_to_numeric(x) if x != 'subtelomere' else x for x in chromosome_mask]
             # delete the "breads", make qlen2 column == qlen without the breads
             filtered_bed_file = cluster.keep_fillings(bed_file)
             filtered = cluster.prepare_data(filtered_bed_file, chromosome_mask, chr_lengths, threshold=500_000)
@@ -330,6 +332,9 @@ def pipeline(**args):
             singleton_cluster_id2 = pd.DataFrame(singleton_cluster_id)
             bed_file['cluster'] = bed_file['cluster'].fillna(bed_file['qname'].map(singleton_cluster_id2.set_index('qname')['cluster']))
             bed_file['n_reads'] = bed_file['n_reads'].fillna(1)
+
+            num_to_string_map = {value: key for key, value in chromosome_to_numeric_map.items()}
+            bed_file['chrom'] = bed_file['chrom'].map(num_to_string_map)
 
             bed_file.to_csv(f'{basename}.mappings.cluster.bed', index=False, sep='\t')
 
