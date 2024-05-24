@@ -1,241 +1,205 @@
 import pandas as pd
-from ncls import NCLS
 import networkx as nx
-import subprocess
-import click
+import numpy as np
 import pysam
-import time
-from functools import wraps
+from sortedintersect import IntervalSet
+from collections import defaultdict, namedtuple
+
+IntervalItem = namedtuple('interval_item',
+                          ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2', 'index'])
 
 
-def measure_time(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        execution_time = end_time - start_time
-        print(f"Execution time of {func.__name__}: {execution_time} seconds")
-        return result
-
-    return wrapper
+# mask high coverage regions - mosdepth algorithm
+# def mosdepth_coverage():
 
 def keep_fillings(bed_file):
-    # make a qlen2 column: qlen-len(bread)
-    # Identify unique values in the specified column
-    bed_file.sort_values(by=['qname', 'qstart'])
-    unique_values = bed_file['qname'].unique()
+    first = {}
+    last = {}
+    for idx, qname in zip(bed_file.index, bed_file['qname']):
+        if qname not in first:
+            first[qname] = idx
+            last[qname] = idx
+        else:
+            last[qname] = idx
+    to_drop = list(first.values()) + list(last.values())
+    bed_file = bed_file[~bed_file.index.isin(to_drop)]
 
-    filtered_df = bed_file.copy()
+    qlen2 = {}
+    for qname, grp in bed_file.groupby('qname'):
+        qlen2[qname] = grp['qend'].max() - grp['qstart'].min()
+    bed_file['qlen2'] = [qlen2[q] for q in bed_file['qname']]
 
-    for value in unique_values:
-        first_occurrence = filtered_df[filtered_df['qname'] == value].index[0]
-        last_occurrence = filtered_df[filtered_df['qname'] == value].index[-1]
-        filtered_df.loc[first_occurrence:last_occurrence, 'qlen2'] = filtered_df.loc[first_occurrence, 'qlen'] - filtered_df.loc[first_occurrence, 'aln_size'] - filtered_df.loc[last_occurrence, 'aln_size']
-        #remove the breads
-        filtered_df = filtered_df.drop([first_occurrence, last_occurrence])
+    return bed_file
 
-    # filter for mapq
-    # delete line with mapq<threshold - as default don't delete any of the lines
-    # filtered = filtered_df[filtered_df.mapq >= mapq_cutoff]
 
-    # Reset the index of the resulting DataFrame
-    filtered_df = filtered_df.reset_index(drop=True)
+def delete_false(bed_file):
+    # Define the string to search for
+    string_to_search = 'False'
+    to_keep = ~bed_file['qname'].str.contains(string_to_search)
+    filtered_df = bed_file[to_keep]
 
     return filtered_df
 
-def build_interval_trees(bed_df):
-    # transform df to dictionary that has chromosomes as keys
-    interval_dict = {}
-    for index, row in bed_df[['chrom', 'rstart', 'rend']].iterrows():
-        key = row['chrom']
-        if key not in interval_dict:
-            interval_dict[key] = []
-        interval_dict[key].append([row['rstart'], row['rend'], index])
-    # make an interval tree for each chromosome
-    interval_trees = {}
-    for chrom, chrom_intervals in interval_dict.items():
-        sorted_intervals = sorted(chrom_intervals, key=lambda x: (x[0], x[1], x[2]))
-        starts = [interval[0] for interval in sorted_intervals]
-        ends = [interval[1] for interval in sorted_intervals]
-        idx = [interval[2] for interval in sorted_intervals]
-        tree = NCLS(starts, ends, ids=idx)
-        interval_trees[chrom] = tree
-    return interval_trees
 
-# filter intervals that don't overlap at least as much as the user input value
-def filter_overlap(overlaps, percentage, query_start, query_end):
-    filtered_overlaps = set([])
-    interval = [i for i in overlaps]
-    for ii in interval:
-        if ((query_end - query_start) / (max(int(ii[1]), query_end) - min(int(ii[0]), query_start))) >= percentage:
-            filtered_overlaps.add(int(ii[2])) #this will return the indexes of the overlaps
-    return filtered_overlaps
 
-#needed for calculating Jaccard similarity
+def mask_sequences2(read_alignments, mask, chromosome_lengths, threshold=500_000):
+    if not mask:
+        return read_alignments
+    new_alignments = []
+    before = len(read_alignments)
+    for a in read_alignments:
+        if 'subtelomere' in mask:
+            if a.start < threshold or (
+                    a.chrom in chromosome_lengths and chromosome_lengths[a.chrom] - a.end < threshold):
+                continue
+            mask.remove('subtelomere')
+            mask = [chromosome_to_numeric(chromosome) for chromosome in mask]
+        if a.chrom in mask:
+            continue
+        new_alignments.append(a)
+    if len(read_alignments) == 1 and before >= 4:
+        return []
+    return new_alignments
+
+
+def prepare_data(bed_df, cluster_mask, chromosome_lengths, threshold=500_000):
+    # need to make sure rend > rstart for sortedintersect, and intervals are sorted
+    bed_df['start'] = np.minimum(bed_df['rstart'], bed_df['rend'])
+    bed_df['end'] = np.maximum(bed_df['rstart'], bed_df['rend'])
+    bed_df = bed_df.sort_values('start')
+    # calculate interval_sizes
+    columns = ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2']
+    data = []
+    for i in zip(*(bed_df[col] for col in columns), bed_df.index):
+        data.append(IntervalItem(*i))
+    if cluster_mask:
+        data = mask_sequences2(data, cluster_mask, chromosome_lengths, threshold)
+    return data
+
+
+def build_interval_trees(data):
+    interval_tree = defaultdict(lambda: IntervalSet(with_data=True))
+    for itv in data:
+        interval_tree[itv.chrom].add(itv.start, itv.end, itv)
+    return interval_tree
+
+
 def calculate_overlap(interval1, interval2):
-    len_1 = interval1[2] - interval1[1]
-    len_2 = max(interval1[2], interval2[2]) - min(interval1[1], interval2[1])
-    percent = len_1 / len_2
-    return percent
+    overlap = max(0, (min(interval1.end, interval2.end) - max(interval1.start, interval2.start)))
+    reciprocal_overlap = min(overlap / interval1.aln_size, overlap / interval2.aln_size)
+    return reciprocal_overlap
 
-def overall_jaccard_similarity(list1, list2, percentage):
-    # Calculate overall intersection and union
+
+# see the sizes of comparisons
+def overall_jaccard_similarity_optimized(l1, l2, l1_comparisons, l2_comparisons, percentage, min_threshold):
+    if not l1 or not l2:
+        return 0, 0
+    l2_matched = set()
+    len1 = len(l1)
+    len2 = len(l2)
+    len_product = len1 * len2
+    l1_comparisons[:len1] = 0
+    l2_comparisons[:len2] = 0
+    zeros = len1 + len2
     intersection = 0
-    union = max(len(list1), len(list2))
+    count = 0
+    for i, interval1 in enumerate(l1):
+        for j, interval2 in enumerate(l2):
+            count += 1
+            if l2_comparisons[j]:
+                continue
+            if j in l2_matched:
+                continue
+
+            if interval1.chrom == interval2.chrom and calculate_overlap(interval1, interval2) >= percentage:
+                l2_matched.add(j)
+                l1_comparisons[i] = 1
+                l2_comparisons[j] = 1
+                intersection += 1
+                zeros -= 2
+                break
+            if count / len_product < 1 - min_threshold and intersection == 0:
+                return 0, 0
+
+    union = intersection + zeros
+
     if union == 0:
-        overall_jaccard_similarity = 0
-    else:
-        for interval1 in list1:
-            for interval2 in list2:
-                # Check if intervals are on the same chromosome
-                if interval1[0] == interval2[0]:
-                    if calculate_overlap(interval1, interval2) >= percentage:
-                        intersection += 1
+        return 0, 0
 
-    # Calculate overall Jaccard similarity
-        overall_jaccard_similarity = intersection / union
+    return intersection / union, intersection
 
-    return overall_jaccard_similarity
 
-# get chromosome length from the header of the alignment file -> find subtelomere regions
-def get_chromosome_lengths(bam_file):
-    chromosome_lengths = {}
-    command = ["samtools", "view", "-H", bam_file]
-    header = subprocess.check_output(command, universal_newlines=True)
-    for line in header.split('\n'):
-        if line.startswith('@SQ'):
-            fields = line.split('\t')
-            for field in fields:
-                if field.startswith('SN:'):
-                    chrom = field.split(':')[1]
-                elif field.startswith('LN:'):
-                    length = int(field.split(':')[1])
-            chromosome_lengths[chrom] = length
-    chromosome_lengths = {key: value for key, value in chromosome_lengths.items() if value > 1000000}
-    return chromosome_lengths
+def get_chromosome_lengths(bam_path):
+    bam_file = pysam.AlignmentFile(bam_path, 'rb')
+    return {bam_file.get_reference_name(tid): l for tid, l in enumerate(bam_file.lengths) if l > 1000000}
 
-def mask_sequences(read, mask, chromosome_lengths):
 
-    mask_set = set(mask)
+def different_lengths_or_alignments(itv1, itv2, qlen_diff, diff):
+    if (min(itv1.qlen2, itv2.qlen2) / max(itv1.qlen2, itv2.qlen2)) >= 1 - qlen_diff:
+        return False
+    if (min(itv1.n_alignments, itv2.n_alignments) / max(itv1.n_alignments, itv2.n_alignments)) >= 1 - diff:
+        return False
+    return True
 
-    # Filter out rows based on mask
-    delete = read['chrom'].str.contains('|'.join(mask_set))
-    read = read[~delete]
 
-    # Check for subtelomere in mask
-    if 'subtelomere' in mask_set:
-        subtelomere = (
-                (read['chrom'].isin(chromosome_lengths.keys())) &
-                ((read['rstart'] > (read['chrom'].map(chromosome_lengths) - 500000)) |
-                 (read['rend'] < 500000))
-        )
-        read = read[~subtelomere]
-    return read
-
-@measure_time
-def query_interval_trees(interval_trees, bed, chromosome_lengths, cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff, mask):
-    # transform df to dictionary that has the qnames as keys
-    query_dict = {}
-    for index, row in bed[['qname', 'chrom', 'rstart', 'rend']].iterrows():
-        key = row['qname']
-        if key not in query_dict:
-            query_dict[key] = []
-        query_dict[key].append((row['chrom'], row['rstart'], row['rend'], index))
-    # Create a graph
+def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff):
+    min_threshold = min(jaccard_threshold)
+    query_intervals = defaultdict(list)
+    for itv in data:
+        query_intervals[itv.qname].append(itv)
     G = nx.Graph()
-    seen_edges = set([])  # once I found an edge I don't want to loop through those qname pairs again
-    match = set([])  # these will be added to the graph
-    edges = 0
-    bad_list = set([]) # too big qlen difference, too big alignment number difference, too low jaccard similarity
-    # loop through the reads
-    for query_key, query_values in query_dict.items():
-        # loop through the alignments within the reads
-        for chr_value, start_value, end_value, index in query_values:
-            tree = interval_trees[chr_value] # get the interval tree
-            overlaps = tree.find_overlap(start_value, end_value) # find overlapping intervals
-            # filter for qlen2 (qlen2 = the length of the fillings)
-            overlaps2 = set([])
-            overlap_intervals = [o for o in overlaps]
-            for o in overlap_intervals:
-                qlen = int(bed.loc[o[2], 'qlen2'])
-                if (int(bed.loc[index, 'qlen2']) * (1 + qlen_diff)) >= qlen and qlen >= (
-                        int(bed.loc[index, 'qlen2']) * (1 - qlen_diff)):
-                    overlaps2.add(o)
-                else:
-                    bad = bed.loc[o[2], 'qname']
-                    bad_list.add(tuple(sorted((bad, query_key)))) # qname pairs where qlen2 was too different
-                    seen_edges.add(tuple(sorted((bad, query_key))))
-            # only keep intervals that overlap above a specified threshold
-            filtered_overlap = filter_overlap(overlaps2, cutoff, start_value, end_value)
-            # check the difference between the number of alignments
-            filtered_overlap2 = set([])
-            for aln in filtered_overlap:
-                alignment_num = bed.loc[aln, 'n_alignments']
-                if (int(bed.loc[index, 'n_alignments']) * (1 + diff)) >= alignment_num and alignment_num >= (
-                        int(bed.loc[index, 'n_alignments']) * (1 - diff)):
-                    filtered_overlap2.add(aln)
-                else:
-                    bad = bed.loc[aln, 'qname']
-                    bad_list.add(tuple(sorted((bad, query_key))))
-                    seen_edges.add(tuple(sorted((bad, query_key))))
-            # retrieve the query names of reads that passed
-            query_name_of_overlaps = bed.loc[list(filtered_overlap2), 'qname']
-            # loop through these qnames
-            for q in query_name_of_overlaps:
-                # check if q, query_key are already in seen or not
-                if q != query_key and tuple(sorted((q, query_key))) not in seen_edges:
-                    # mask regions in case n_alignments > 3
-                    if bed[bed['qname'] == query_key].iloc[0]['n_alignments'] > 3 and mask != None:
-                        q1 = mask_sequences(bed[bed['qname'] == query_key], mask, chromosome_lengths)
-                    else:
-                        q1 = bed[bed['qname'] == query_key]
-                    set1 = set(q1[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
-                    if bed[bed['qname'] == query_key].iloc[0]['n_alignments'] > 3 and mask != None:
-                        q2 = mask_sequences(bed[bed['qname'] == query_key], mask, chromosome_lengths)
-                    else:
-                        q2 = bed[bed['qname'] == query_key]
-                    set2 = set(q2[['chrom', 'rstart', 'rend']].itertuples(index=False, name=None))
-                    # calculate jaccard sim. between each read
-                    j = overall_jaccard_similarity(set1, set2, cutoff)
-                    # check if jaccard sim. is above the threshold and add to the graph if it is
-                    if j >= jaccard_threshold:
-                        match.add((query_key, q, j))
-                        G.add_node(q)
-                        if edges == 0:
-                            G.add_node(query_key)
-                        G.add_edge(query_key, q)
-                        edges += 1
-                    else:
-                        bad_list.add((q, query_key))
-                    seen_edges.add(tuple(sorted(((q, query_key)))))
+    seen_edges = set([])
+    match = set([])
+    l1_comparisons = np.zeros(100000)
+    l2_comparisons = np.zeros(100000)
+    for query_key, list1 in query_intervals.items():
+        edges = 0
+        for itv in list1:
+            overlap_intervals = interval_trees[itv.chrom].search_interval(itv.start, itv.end)
+            for ol_start, ol_end, o_data in overlap_intervals:
+                if o_data.qname == query_key:
+                    continue
+                b = tuple(sorted((o_data.qname, query_key)))
+                if b in seen_edges:
+                    continue
+                if different_lengths_or_alignments(itv, o_data, qlen_diff, diff):
+                    seen_edges.add(b)
+                    continue
+                # add counter
+                list2 = query_intervals[o_data.qname]
 
+                j, n_i = overall_jaccard_similarity_optimized(list1, list2, l1_comparisons, l2_comparisons,
+                                                              overlap_cutoff, min_threshold)
+                if n_i == 0:
+                    continue
+                target = jaccard_threshold[n_i - 1] if n_i - 1 < len(jaccard_threshold) else jaccard_threshold[-1]
+                if j >= target:
+                    match.add((query_key, o_data.qname, j))
+                    G.add_edge(query_key, o_data.qname)
+                    edges += 1
+                seen_edges.add(b)
                 if edges >= edge_threshold:
-                    break  # breaks the inner loop for the current query
+                    break
 
     match_df = pd.DataFrame(match, columns=['query1', 'query2', 'jaccard_similarity'])
-    return match_df, G, bad_list
+    return match_df, G
+
 
 def get_subgraphs(G):
     # Identify groups of connected components (or subgraphs)
     sub_graphs = nx.connected_components(G)
-
     sub_graphs = list(sub_graphs)
-
     return sub_graphs
-@measure_time
+
+
 def choose_alignment(bed_file):
-    # calculate average alignment scores for each read
     qname_grouped = bed_file.groupby('qname')
     avg_scores = qname_grouped['alignment_score'].mean()
 
-    # Map the average alignment scores back to the bed_file using qname
     bed_file['avg_alignment_score'] = bed_file['qname'].map(avg_scores)
 
-    # Group reads by cluster identifier
     cluster_grouped = bed_file.groupby('cluster')
 
-    # list to store reads with highest score in each cluster
     selected_reads = []
 
     for cluster_id, group in cluster_grouped:
@@ -246,9 +210,3 @@ def choose_alignment(bed_file):
     selected_reads_df = bed_file[bed_file['qname'].isin(selected_reads)]
 
     return selected_reads_df
-
-
-
-
-
-
