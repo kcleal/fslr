@@ -39,7 +39,7 @@ Default usage:
          --primers 21q1,17p6 \
          --basecalled basecalled/samp1/pass \
          --procs 16
-         --mask subtelomere,TALEN
+         --mask subtelomere,L1_TALEN
 
 Skip clustering:
 ::
@@ -63,7 +63,7 @@ Skip alignment:
          --primers 21q1 \
          --procs 16 \
          --skip-alignment \
-         --mask subtelomere,TALEN
+         --mask subtelomere,L1_TALEN
 
 Options
 -------
@@ -109,7 +109,8 @@ Options
 | `--mask`                  | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
 |                           | subtemoleric regions, TALEN.                                                             |
 +---------------------------+------------------------------------------------------------------------------------------+
-
+| `--filter-false`          | Use reads with both primers labeled.                                                     |
++---------------------------+------------------------------------------------------------------------------------------+
 Outputs
 -------
 Default usage

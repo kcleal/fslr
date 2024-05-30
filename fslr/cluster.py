@@ -6,11 +6,8 @@ from sortedintersect import IntervalSet
 from collections import defaultdict, namedtuple
 
 IntervalItem = namedtuple('interval_item',
-                          ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2', 'index'])
+                          ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2', 'middle', 'index'])
 
-
-# mask high coverage regions - mosdepth algorithm
-# def mosdepth_coverage():
 
 def keep_fillings(bed_file):
     first = {}
@@ -32,6 +29,51 @@ def keep_fillings(bed_file):
     return bed_file
 
 
+def rename_chromosomes(bed_file, chromosome_lengths, chromosome_mask):
+    chromosome_names = sorted(set(bed_file['chrom'].unique().tolist()),
+                              key=lambda x: int(x[3:]) if x[3:].isdigit() and x[:3] == 'chr' else float('inf'))
+    chromosome_to_numeric_map = {name: i + 1 for i, name in enumerate(chromosome_names)}
+
+    chr_lengths = {chromosome_to_numeric_map.get(k): v for k, v in chromosome_lengths.items()}
+    bed_file['chrom'] = bed_file['chrom'].apply(chromosome_to_numeric_map.get)
+    chromosome_mask = [chromosome_to_numeric_map.get(x) if x != 'subtelomere' else x for x in chromosome_mask]
+
+    return bed_file, chr_lengths, chromosome_mask, chromosome_to_numeric_map
+
+def chrom_to_str(bed_df, chromosome_to_numeric_map):
+    num_to_string_map = {value: key for key, value in chromosome_to_numeric_map.items()}
+    bed_df['chrom'] = bed_df['chrom'].map(num_to_string_map)
+    return bed_df
+
+
+def calc_coverage(bed_file, chromosome_lengths):
+    coverage = {}
+
+    grouped_by_chr = bed_file.groupby('chrom')
+
+    for chr, group in grouped_by_chr:
+        if chr not in chromosome_lengths:
+            continue
+        c = np.zeros(chromosome_lengths[chr] + 1)
+
+        np.add.at(c, group['rstart'].values, 1)
+        np.add.at(c, group['rend'].values, -1)
+
+        coverage[chr] = np.cumsum(c)
+
+    return coverage
+
+
+def filter_high_coverage(data, bed_file, chromosome_lengths, threshold):
+    cov = calc_coverage(bed_file, chromosome_lengths)
+    new_alignments = []
+    for aln in data:
+        if cov[aln.chrom][aln.middle] > threshold:
+            continue
+        new_alignments.append(aln)
+    return new_alignments
+
+
 def delete_false(bed_file):
     # Define the string to search for
     string_to_search = 'False'
@@ -41,12 +83,12 @@ def delete_false(bed_file):
     return filtered_df
 
 
-
 def mask_sequences2(read_alignments, mask, chromosome_lengths, threshold=500_000):
     if not mask:
         return read_alignments
     new_alignments = []
     before = len(read_alignments)
+    chromosome_lengths = {key: value for key, value in chromosome_lengths.items() if value > 1000000}
     for a in read_alignments:
         if 'subtelomere' in mask:
             if a.start < threshold or (
@@ -64,9 +106,9 @@ def prepare_data(bed_df, cluster_mask, chromosome_lengths, threshold=500_000):
     # need to make sure rend > rstart for sortedintersect, and intervals are sorted
     bed_df['start'] = np.minimum(bed_df['rstart'], bed_df['rend'])
     bed_df['end'] = np.maximum(bed_df['rstart'], bed_df['rend'])
+    bed_df['middle'] = bed_df['aln_size'] // 2 + bed_df['start']
     bed_df = bed_df.sort_values('start')
-    # calculate interval_sizes
-    columns = ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2']
+    columns = ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2', 'middle']
     data = []
     for i in zip(*(bed_df[col] for col in columns), bed_df.index):
         data.append(IntervalItem(*i))
@@ -89,7 +131,7 @@ def calculate_overlap(interval1, interval2):
 
 
 # see the sizes of comparisons
-def overall_jaccard_similarity_optimized(l1, l2, l1_comparisons, l2_comparisons, percentage, min_threshold):
+def overall_jaccard_similarity(l1, l2, l1_comparisons, l2_comparisons, percentage, min_threshold):
     if not l1 or not l2:
         return 0, 0
     len1 = len(l1)
@@ -124,7 +166,7 @@ def overall_jaccard_similarity_optimized(l1, l2, l1_comparisons, l2_comparisons,
 
 def get_chromosome_lengths(bam_path):
     bam_file = pysam.AlignmentFile(bam_path, 'rb')
-    return {bam_file.get_reference_name(tid): l for tid, l in enumerate(bam_file.lengths) if l > 1000000}
+    return {bam_file.get_reference_name(tid): l for tid, l in enumerate(bam_file.lengths)}
 
 
 def different_lengths_or_alignments(itv1, itv2, qlen_diff, diff):
@@ -161,7 +203,7 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                 # add counter
                 list2 = query_intervals[o_data.qname]
 
-                j, n_i = overall_jaccard_similarity_optimized(list1, list2, l1_comparisons, l2_comparisons,
+                j, n_i = overall_jaccard_similarity(list1, list2, l1_comparisons, l2_comparisons,
                                                               overlap_cutoff, min_threshold)
                 if n_i == 0:
                     continue
