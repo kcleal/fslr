@@ -5,6 +5,7 @@ import pysam
 from sortedintersect import IntervalSet
 from collections import defaultdict, namedtuple
 
+
 IntervalItem = namedtuple('interval_item',
                           ['chrom', 'start', 'end', 'aln_size', 'qname', 'n_alignments', 'qlen2', 'middle', 'index'])
 
@@ -39,6 +40,7 @@ def rename_chromosomes(bed_file, chromosome_lengths, chromosome_mask):
     chromosome_mask = [chromosome_to_numeric_map.get(x) if x != 'subtelomere' else x for x in chromosome_mask]
 
     return bed_file, chr_lengths, chromosome_mask, chromosome_to_numeric_map
+
 
 def chrom_to_str(bed_df, chromosome_to_numeric_map):
     num_to_string_map = {value: key for key, value in chromosome_to_numeric_map.items()}
@@ -177,6 +179,7 @@ def different_lengths_or_alignments(itv1, itv2, qlen_diff, diff):
     return True
 
 
+
 def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold, edge_threshold, qlen_diff, diff):
     min_threshold = min(jaccard_threshold)
     query_intervals = defaultdict(list)
@@ -187,6 +190,7 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
     match = set([])
     l1_comparisons = np.zeros(100000)
     l2_comparisons = np.zeros(100000)
+
     for query_key, list1 in query_intervals.items():
         edges = 0
         for itv in list1:
@@ -200,6 +204,7 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                 if different_lengths_or_alignments(itv, o_data, qlen_diff, diff):
                     seen_edges.add(b)
                     continue
+
                 # add counter
                 list2 = query_intervals[o_data.qname]
 

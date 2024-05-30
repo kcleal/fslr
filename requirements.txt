@@ -9,7 +9,7 @@ pysam
 pywfa
 kmerhash
 scikit-learn
-ncls
+sortedintersect
 
 # conda install -c bioconda -c conda-forge abpoa bwa samtools minimap2 tantan
 # pip install dodi

@@ -38,6 +38,7 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--cluster-mask', default='subtelomere', required=False, show_default=True, help="Comma separated list of chromosome names to be excluded from the clustering. Use 'subtelomere' to exclude alignments within 500kb of telomere end")
 @click.option('--filter-high-coverage', required=False, is_flag=True, help='Filter regions with high coverage')
 @click.option('--filter-false', required=False, is_flag=True, help='Use reads with both primers labeled')
+
 @click.version_option(__version__)
 def pipeline(**args):
 
@@ -203,7 +204,6 @@ def pipeline(**args):
                         chromosome_mask.add(item)
 
 
-
             jaccard_cutoffs = [float(i) for i in args['jaccard_cutoffs'].split(',')]
             overlap = args['overlap']
             edge_threshold = 10
@@ -218,23 +218,19 @@ def pipeline(**args):
                 bed_file = cluster.delete_false(bed_file)
 
             # delete the "breads", make qlen2 column == qlen without the breads
-            filtered_bed_file = cluster.keep_fillings(bed_file)
+            fillings = cluster.keep_fillings(bed_file)
 
-
-            filtered = cluster.prepare_data(filtered_bed_file, chromosome_mask, chr_lengths, threshold=500_000)
-
-            if args['filter_high_coverage']:
-                filtered = cluster.filter_high_coverage(filtered, bed_file, chr_lengths, threshold=10000)
+              if args['filter_high_coverage']:
+                fillings = cluster.filter_high_coverage(fillings, bed_file, chr_lengths, threshold=10000)
+        
+            data = cluster.prepare_data(filtered_bed_file, chromosome_mask, chr_lengths, threshold=500_000)
 
             # build interval trees for each chr
-            interval_tree = cluster.build_interval_trees(filtered)
+            interval_tree = cluster.build_interval_trees(data)
             # find queries that are similar and add them to a graph
-            match_data, network = cluster.query_interval_trees(interval_tree, filtered, overlap,
-                                                                         jaccard_cutoffs, edge_threshold, qlen_diff,
-                                                                         n_alignments_diff)
+            match_data, network = cluster.query_interval_trees(interval_tree, data, overlap, jaccard_cutoffs, edge_threshold, qlen_diff, n_alignments_diff)
             # extract the subgraphs from the network
             subgraphs = cluster.get_subgraphs(network)
-
 
             # don't continue if 0 clusters were found
             if len(list(subgraphs)) == network.number_of_nodes():
