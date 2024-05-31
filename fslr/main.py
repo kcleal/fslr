@@ -8,6 +8,9 @@ import subprocess
 import sys
 import os
 from importlib.metadata import version
+import warnings
+
+warnings.filterwarnings('ignore')
 
 __version__ = version("fslr")
 file_path = os.path.dirname(os.path.realpath(__file__))
@@ -33,6 +36,9 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--n-alignment-diff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
 @click.option('--qlen-diff', default=0.04, required=False, show_default=True, help="Max difference in query length. Fraction in the range 0-1.")
 @click.option('--cluster-mask', default='subtelomere', required=False, show_default=True, help="Comma separated list of chromosome names to be excluded from the clustering. Use 'subtelomere' to exclude alignments within 500kb of telomere end")
+@click.option('--filter-high-coverage', required=False, is_flag=True, help='Filter regions with high coverage')
+@click.option('--filter-false', required=False, is_flag=True, help='Use reads with both primers labeled')
+
 @click.version_option(__version__)
 def pipeline(**args):
 
@@ -197,6 +203,7 @@ def pipeline(**args):
                     if item in allowed or item == 'subtelomere':
                         chromosome_mask.add(item)
 
+
             jaccard_cutoffs = [float(i) for i in args['jaccard_cutoffs'].split(',')]
             overlap = args['overlap']
             edge_threshold = 10
@@ -204,12 +211,22 @@ def pipeline(**args):
             n_alignments_diff = args['n_alignment_diff']
 
             chr_lengths = cluster.get_chromosome_lengths(f'{basename}.bwa_dodi.bam')
+
+            bed_file, chr_lengths, chromosome_mask, chrom_to_num_map = cluster.rename_chromosomes(bed_file, chr_lengths, chromosome_mask)
+
+            if args['filter_false']:
+                bed_file = cluster.delete_false(bed_file)
+
             # delete the "breads", make qlen2 column == qlen without the breads
             fillings = cluster.keep_fillings(bed_file)
 
-            data = cluster.prepare_data(fillings, chromosome_mask, chr_lengths, threshold=500_000)
-            interval_tree = cluster.build_interval_trees(data)
+              if args['filter_high_coverage']:
+                fillings = cluster.filter_high_coverage(fillings, bed_file, chr_lengths, threshold=10000)
+        
+            data = cluster.prepare_data(filtered_bed_file, chromosome_mask, chr_lengths, threshold=500_000)
 
+            # build interval trees for each chr
+            interval_tree = cluster.build_interval_trees(data)
             # find queries that are similar and add them to a graph
             match_data, network = cluster.query_interval_trees(interval_tree, data, overlap, jaccard_cutoffs, edge_threshold, qlen_diff, n_alignments_diff)
             # extract the subgraphs from the network
@@ -312,6 +329,11 @@ def pipeline(**args):
             singleton_cluster_id2 = pd.DataFrame(singleton_cluster_id)
             bed_file['cluster'] = bed_file['cluster'].fillna(bed_file['qname'].map(singleton_cluster_id2.set_index('qname')['cluster']))
             bed_file['n_reads'] = bed_file['n_reads'].fillna(1)
+
+            bed_file = cluster.chrom_to_str(bed_file, chrom_to_num_map)
+
+            #num_to_string_map = {value: key for key, value in chromosome_to_numeric_map.items()}
+            #bed_file['chrom'] = bed_file['chrom'].map(num_to_string_map)
 
             bed_file.to_csv(f'{basename}.mappings.cluster.bed', index=False, sep='\t')
 

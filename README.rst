@@ -41,6 +41,7 @@ Default usage:
          --procs 16
          --cluster-mask subtelomere,L1_TALEN
 
+
 Skip clustering:
 ::
     fslr --name samp1 \
@@ -109,7 +110,8 @@ Options
 | `--cluster-mask`          | Comma separated list of regions/chromosomes to be excluded from the clustering e.g.:     |
 |                           | subtemoleric regions, L1_TALEN.                                                             |
 +---------------------------+------------------------------------------------------------------------------------------+
-
+| `--filter-false`          | Use reads with both primers labeled.                                                     |
++---------------------------+------------------------------------------------------------------------------------------+
 Outputs
 -------
 Default usage
