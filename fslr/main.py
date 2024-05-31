@@ -104,7 +104,7 @@ def pipeline(**args):
             jobs = []
             for pth in glob.glob(f'{args["out"]}/*filtered_junk.fq'):
                 if os.path.getsize(pth) == 0:
-                    raise ValueError(f"The file '{pth}' is empty.")
+                    print(f"WARNING: The file '{pth}' is empty.", file=sys.stderr)
                 jobs.append((pth, primers_target, lock, filter_counts, args['keep_temp'], args['trim_threshold']))
             if args['procs'] > 1:
                 with multiprocessing.Pool(args['procs']) as p:
