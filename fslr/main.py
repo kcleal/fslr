@@ -222,7 +222,7 @@ def pipeline(**args):
             if args['filter_high_coverage']:
                 fillings = cluster.filter_high_coverage(fillings, bed_file, chr_lengths, threshold=10000)
         
-            data = cluster.prepare_data(filtered_bed_file, chromosome_mask, chr_lengths, threshold=500_000)
+            data = cluster.prepare_data(bed_file, chromosome_mask, chr_lengths, threshold=500_000)
 
             # build interval trees for each chr
             interval_tree = cluster.build_interval_trees(data)
