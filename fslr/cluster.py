@@ -133,13 +133,14 @@ def calculate_overlap(interval1, interval2):
 
 
 # see the sizes of comparisons
-def overall_jaccard_similarity(l1, l2, l1_comparisons, l2_comparisons, percentage, min_threshold):
+def overall_jaccard_similarity(l1, l2, l2_comparisons, percentage, min_threshold):
+
     if not l1 or not l2:
         return 0, 0
     len1 = len(l1)
     len2 = len(l2)
     len_product = len1 * len2
-    l1_comparisons[:len1] = 0
+
     l2_comparisons[:len2] = 0
     zeros = len1 + len2
     intersection = 0
@@ -150,13 +151,12 @@ def overall_jaccard_similarity(l1, l2, l1_comparisons, l2_comparisons, percentag
             if l2_comparisons[j]:
                 continue
             if interval1.chrom == interval2.chrom and calculate_overlap(interval1, interval2) >= percentage:
-                l1_comparisons[i] = 1
                 l2_comparisons[j] = 1
                 intersection += 1
                 zeros -= 2
                 break
             if count / len_product < 1 - min_threshold and intersection == 0:
-                return 0, 0
+                continue
 
     union = intersection + zeros
 
@@ -188,7 +188,6 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
     G = nx.Graph()
     seen_edges = set([])
     match = set([])
-    l1_comparisons = np.zeros(100000)
     l2_comparisons = np.zeros(100000)
 
     for query_key, list1 in query_intervals.items():
@@ -201,15 +200,14 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                 b = tuple(sorted((o_data.qname, query_key)))
                 if b in seen_edges:
                     continue
+                seen_edges.add(b)
                 if different_lengths_or_alignments(itv, o_data, qlen_diff, diff):
-                    seen_edges.add(b)
                     continue
 
                 # add counter
                 list2 = query_intervals[o_data.qname]
 
-                j, n_i = overall_jaccard_similarity(list1, list2, l1_comparisons, l2_comparisons,
-                                                              overlap_cutoff, min_threshold)
+                j, n_i = overall_jaccard_similarity(list1, list2, l2_comparisons, overlap_cutoff, min_threshold)
                 if n_i == 0:
                     continue
                 target = jaccard_threshold[n_i - 1] if n_i - 1 < len(jaccard_threshold) else jaccard_threshold[-1]
@@ -217,7 +215,6 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
                     match.add((query_key, o_data.qname, j))
                     G.add_edge(query_key, o_data.qname)
                     edges += 1
-                seen_edges.add(b)
                 if edges >= edge_threshold:
                     break
 
