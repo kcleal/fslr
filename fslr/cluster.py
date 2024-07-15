@@ -92,12 +92,13 @@ def mask_sequences2(read_alignments, mask, chromosome_lengths, threshold=500_000
     before = len(read_alignments)
     chromosome_lengths = {key: value for key, value in chromosome_lengths.items() if value > 1000000}
     for a in read_alignments:
-        if 'subtelomere' in mask:
-            if a.start < threshold or (
-                    a.chrom in chromosome_lengths and chromosome_lengths[a.chrom] - a.end < threshold):
-                continue
         if a.chrom in mask:
             continue
+        if 'subtelomere' in mask:
+            if a.chrom in chromosome_lengths and \
+               (a.start < threshold or chromosome_lengths[a.chrom] - a.end < threshold):
+                continue
+
         new_alignments.append(a)
     if len(read_alignments) == 1 and before >= 4:
         return []
