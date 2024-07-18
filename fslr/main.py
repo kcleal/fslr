@@ -148,7 +148,7 @@ def pipeline(**args):
                     os.remove(f'{basename}_merged_mappings.bam')
 
             else:
-                if not args['keep_temp']:
+                if args['keep_temp']:
                     c = "cat {basename}.*.primers_labelled.fq | " \
                         "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - > " \
                         "{basename}.bwa_output.sam; " \
