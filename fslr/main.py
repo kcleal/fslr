@@ -149,15 +149,27 @@ def pipeline(**args):
                     os.remove(f'{basename}_merged_mappings.bam')
 
             else:
-                c = "cat {basename}.*.primers_labelled.fq | " \
-                    "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
-                    "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
-                    "samtools view -bh - |" \
-                    "samtools sort -o {basename}.bwa_dodi.bam; " \
-                    "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
-                                                                    basename=basename,
-                                                                    procs=args['procs'],
-                                                                    ref=args['ref'])
+                if not args['keep_temp']:
+                    c = "cat {basename}.*.primers_labelled.fq | " \
+                        "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - > " \
+                        "{basename}.bwa_output.sam; " \
+                        "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 {basename}.bwa_output.sam |" \
+                        "samtools view -bh - |" \
+                        "samtools sort -o {basename}.bwa_dodi.bam; " \
+                        "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
+                                                                        basename=basename,
+                                                                        procs=args['procs'],
+                                                                        ref=args['ref'])
+                else:
+                    c = "cat {basename}.*.primers_labelled.fq | " \
+                        "bwa mem -c 1000 -A2 -B3 -O5 -E2 -T0 -L0 -D 0.25 -r 1.25 -d 200 -k 11 -a -t{procs} {ref} - |" \
+                        "dodi {bias_params} --paired False -c 1 -u 21 --ol-cost 2 --max-overlap 50000 - |" \
+                        "samtools view -bh - |" \
+                        "samtools sort -o {basename}.bwa_dodi.bam; " \
+                        "samtools index {basename}.bwa_dodi.bam".format(bias_params=bias_params,
+                                                                        basename=basename,
+                                                                        procs=args['procs'],
+                                                                        ref=args['ref'])
                 subprocess.run(c, shell=True)
 
             if not args['keep_temp']:
