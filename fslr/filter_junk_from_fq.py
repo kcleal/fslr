@@ -106,10 +106,8 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
 
     length = 150
 
-    if tantanfile:
-        f = pysam.FastxFile(tantanfile)
-    else:
-        f = None
+    f = pysam.FastxFile(tantanfile)
+
     bad = set([])
     name = fq_input.split('/')[-1].split('.')[0]
 
@@ -120,24 +118,23 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
 
         # find blocks of lowercase
         drop = False
-        if f:
-            for start, end in find_lower_case(seq):
-                if end - start > length:
-                    s = seq[start:end].upper()
+        for start, end in find_lower_case(seq):
+            if end - start > length:
+                s = seq[start:end].upper()
 
-                    pct_tel = telmer_pct(rot, s)
+                pct_tel = telmer_pct(rot, s)
 
-                    if pct_tel > 0.3:
-                        continue
-                    rep = compute_rep(s)
-                    if rep < 0.3:
-                        continue
+                if pct_tel > 0.3:
+                    continue
+                rep = compute_rep(s)
+                if rep < 0.3:
+                    continue
 
-                    bad.add(l.name)
-                    filter_counts['junk_seqs_dropped'] += 1
-                    drop = True
-                    break
-        if not drop:
+                bad.add(l.name)
+                filter_counts['junk_seqs_dropped'] += 1
+                drop = True
+                break
+        else:
             concat = check_for_concatemer(seq, primer_list, primers, primers_r)
             if concat:
                 filter_counts['concatemers_dropped'] += 1
@@ -187,14 +184,11 @@ def func(args):
     fq_input, primers, outfolder, outname, filter_counts_all, lock, keep_temp = args
     with open(f'{outfolder}/{outname}.{temp_name}.filtered_junk.fq', 'w') as outfile:
         primers_r = {k: rev_comp(v) for k, v in primers.items()}
-        if args["skip_tantan"] == False:
-            if fq_input[-3:] == ".gz":
-                subprocess.run(f'gzip -dc {fq_input} | tantan - > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
-            else:
-                subprocess.run(f'tantan {fq_input} > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
-            tantanfile = glob.glob(f'{outfolder}/tmp.tantan.{temp_name}.fasta')[0]
+        if fq_input[-3:] == ".gz":
+            subprocess.run(f'gzip -dc {fq_input} | tantan - > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
         else:
-            tantanfile = ""
+            subprocess.run(f'tantan {fq_input} > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
+        tantanfile = glob.glob(f'{outfolder}/tmp.tantan.{temp_name}.fasta')[0]
         primer_list = primers.keys()
         fc = get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot)
         if not keep_temp:
