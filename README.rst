@@ -2,7 +2,7 @@
 fslr
 ====
 
-Identify split-read alignments from a Fusion-Seq long read experiment.
+Identify split-read alignments from a long-read PCR amplicon data.
 
 Table of contents
 -----------------
@@ -165,10 +165,11 @@ How it works
     then selected using dodi.
     A BAM and BED file is saved at this stage; [name].bwa_dodi.bam, [name].mappings.bed.
 
-4. Cluster the reads:
+4. Cluster the 'complex' reads:
 
-    The purpose of the clustering step is to identify highly similar reads that are potentially the result of the same
-    event getting amplified prior to the sequencing.
+    The purpose of the clustering step is to identify reads with similar mapping patetrns that are potentially the result of the same
+    event getting amplified prior to the sequencing. In other words, we are aiming to cluster reads that are from the same complex
+    structural rearrangement. This step is only applied to reads with >=3 alignments.
     It works by constructing a graph based on the level of overlapping intervals and utilizing Jaccard-similarity
     measures.
     A [name].mappings.cluster.bed file is created that shows which reads and alignments are in the same cluster.
