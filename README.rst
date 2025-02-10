@@ -2,7 +2,7 @@
 fslr
 ====
 
-Identify split-read alignments from a long-read PCR amplicon data.
+Identify split-read alignments from long-read PCR amplicon data.
 
 Table of contents
 -----------------
