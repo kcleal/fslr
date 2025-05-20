@@ -53,6 +53,7 @@ def pipeline(**args):
         filter_counts['total_dropped'] = 0
         filter_counts['concatemers_dropped'] = 0
         filter_counts['junk_seqs_dropped'] = 0
+        filter_counts['short_seqs_dropped'] = 0
         filter_counts['False_False'] = 0
 
         primers_d = pd.read_csv(os.path.dirname(os.path.realpath(__file__)) + '/primers.csv')

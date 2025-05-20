@@ -155,7 +155,7 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
             reason = check_for_concatemer(seq, primer_list, primers, primers_r)
             if reason:
                 if reason == '_short':
-                    filter_counts['short_dropped'] += 1
+                    filter_counts['short_seqs_dropped'] += 1
                 elif reason == '_concatemer':
                     filter_counts['concatemers_dropped'] += 1
                 else:
