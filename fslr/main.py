@@ -195,6 +195,7 @@ def pipeline(**args):
             filter_counts['total_dropped'] = 0
             filter_counts['conactemers_dropped'] = 0
             filter_counts['junk_seqs_dropped'] = 0
+            filter_counts['short_seqs_dropped'] = 0
             filter_counts['False_False'] = 0
 
 
