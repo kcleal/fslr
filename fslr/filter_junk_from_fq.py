@@ -117,7 +117,7 @@ def telmer_pct(rot, s):
     return telmer_count / tot
 
 
-def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
+def get_seqs_to_drop(primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
                      junkfile):
 
     length = 150
@@ -221,7 +221,7 @@ def func(args):
             subprocess.run(f'tantan {fq_input} > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
         tantanfile = glob.glob(f'{outfolder}/tmp.tantan.{temp_name}.fasta')[0]
         primer_list = primers.keys()
-        fc = get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
+        fc = get_seqs_to_drop(primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
                               junkfile if keep_temp else None)
         if not keep_temp:
             os.remove(f'{outfolder}/tmp.tantan.{temp_name}.fasta')
