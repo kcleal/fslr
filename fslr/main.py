@@ -30,7 +30,6 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--reference-mask', required=False, type=click.Path(exists=True), help='A bed file containing target regions for creating a masked reference. Reads are first aligned to the masked reference, prior to using the main reference')
 @click.option('--skip-alignment', required=False, is_flag=True, help='Skip alignment step')
 @click.option('--skip-clustering', required=False, is_flag=True, help='Skip clustering step')
-#@click.option('--jaccard-cutoff', required=False, default=0.7, show_default=True, help="Jaccard similarity index, a number between 0-1, below which reads won't be considered in the same cluster")
 @click.option('--jaccard-cutoffs', required=False, default='1,1,0.66,0.66,0.66,0.5', show_default=True, help="Comma-separated list of Jaccard similarity thresholds for N-1 intersections e.g. where index=0 corresponds to one the threshold for 1 intersection.")
 @click.option('--overlap', required=False, default=0.8, show_default=True, help="A number between 0 and 1. Zero means two reads don't overlap at all, while 1 means the start and end of the reads is identical.")
 @click.option('--n-alignment-diff', default=0.25, required=False, show_default=True, help='How much the number of alignments in one cluster can differ. Fraction in the range 0-1.')
@@ -38,7 +37,6 @@ file_path = os.path.dirname(os.path.realpath(__file__))
 @click.option('--cluster-mask', default='subtelomere', required=False, show_default=True, help="Comma separated list of chromosome names to be excluded from the clustering. Use 'subtelomere' to exclude alignments within 500kb of telomere end")
 @click.option('--filter-high-coverage', required=False, is_flag=True, help='Filter regions with high coverage')
 @click.option('--filter-false', required=False, is_flag=True, help='Use reads with both primers labeled')
-
 @click.version_option(__version__)
 def pipeline(**args):
 

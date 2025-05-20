@@ -2,6 +2,7 @@ import click
 import pysam
 import subprocess
 import pandas as pd
+
 def make_consensus_seq(subg, out, name, bed_file, primer_list):
     # make fasta files for each cluster -> use it to make a consensus sequence
     rows_list = []

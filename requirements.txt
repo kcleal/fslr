@@ -9,7 +9,7 @@ pysam
 pywfa
 kmerhash
 scikit-learn
-sortedintersect
+superintervals >= 0.2.10
 
 # conda install -c bioconda -c conda-forge abpoa bwa samtools minimap2 tantan
 # pip install dodi

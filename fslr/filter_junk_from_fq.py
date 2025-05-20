@@ -102,7 +102,8 @@ def telmer_pct(rot, s):
     return telmer_count / tot
 
 
-def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot):
+def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
+                     junkfile):
 
     length = 150
 
@@ -133,18 +134,25 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
                 bad.add(l.name)
                 filter_counts['junk_seqs_dropped'] += 1
                 drop = True
+                if junkfile:
+                    l.name += '_junk'
                 break
         else:
             concat = check_for_concatemer(seq, primer_list, primers, primers_r)
             if concat:
                 filter_counts['concatemers_dropped'] += 1
                 drop = True
+                if junkfile:
+                    l.name += '_concatemer'
 
         if not drop:
             filter_counts['total_kept'] += 1
             outfile.write(str(l) + '\n')
         else:
             filter_counts['total_dropped'] += 1
+            if junkfile:
+                junkfile.write(str(l) + '\n')
+
 
     with lock:
         for k, v in filter_counts.items():
@@ -182,7 +190,8 @@ def func(args):
 
     temp_name = str(uuid.uuid4())
     fq_input, primers, outfolder, outname, filter_counts_all, lock, keep_temp = args
-    with open(f'{outfolder}/{outname}.{temp_name}.filtered_junk.fq', 'w') as outfile:
+    with open(f'{outfolder}/{outname}.{temp_name}.filtered_junk.fq', 'w') as outfile, \
+         open(f'{outfolder}/{outname}.{temp_name}.junk.fq', 'w') as junkfile:
         primers_r = {k: rev_comp(v) for k, v in primers.items()}
         if fq_input[-3:] == ".gz":
             subprocess.run(f'gzip -dc {fq_input} | tantan - > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
@@ -190,10 +199,11 @@ def func(args):
             subprocess.run(f'tantan {fq_input} > {outfolder}/tmp.tantan.{temp_name}.fasta', shell=True)
         tantanfile = glob.glob(f'{outfolder}/tmp.tantan.{temp_name}.fasta')[0]
         primer_list = primers.keys()
-        fc = get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot)
+        fc = get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_counts_all, tantanfile, lock, rot,
+                              junkfile if keep_temp else None)
         if not keep_temp:
             os.remove(f'{outfolder}/tmp.tantan.{temp_name}.fasta')
-
+            os.remove(f'{outfolder}/{outname}.{temp_name}.junk.fq')
         with lock:
             print(fq_input, file=sys.stderr)
             print(fc, file=stderr)

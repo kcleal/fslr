@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="fslr",
-    version='0.3.9',
+    version='0.3.10',
     license='MIT',
     python_requires='>=3.7',
     install_requires=[
@@ -14,7 +14,7 @@ setup(
             'networkx',
             'pafpy',
             'pysam',
-            'sortedintersect'
+            'superintervals >= 0.2.10'
         ],
     packages=find_packages(where="."),
     package_data={'': ['primers.csv']},
