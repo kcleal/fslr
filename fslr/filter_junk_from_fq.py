@@ -125,7 +125,6 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
     f = pysam.FastxFile(tantanfile)
 
     bad = set([])
-    name = fq_input.split('/')[-1].split('.')[0]
 
     filter_counts = {'total_kept': 0, 'concatemers_dropped': 0, 'total_dropped': 0, 'junk_seqs_dropped': 0}
 
@@ -155,7 +154,14 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
         else:
             reason = check_for_concatemer(seq, primer_list, primers, primers_r)
             if reason:
-                filter_counts['concatemers_dropped'] += 1
+                if reason == '_short':
+                    filter_counts['short_dropped'] += 1
+                elif reason == '_concatemer':
+                    filter_counts['concatemers_dropped'] += 1
+                else:
+                    raise RuntimeError(reason)
+
+                # filter_counts['concatemers_dropped'] += 1
                 drop = True
                 if junkfile:
                     l.name += reason
