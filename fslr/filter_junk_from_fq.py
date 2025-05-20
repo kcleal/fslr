@@ -126,7 +126,8 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
 
     bad = set([])
 
-    filter_counts = {'total_kept': 0, 'concatemers_dropped': 0, 'total_dropped': 0, 'junk_seqs_dropped': 0}
+    filter_counts = {'total_kept': 0, 'concatemers_dropped': 0, 'total_dropped': 0, 'junk_seqs_dropped': 0,
+                     'short_seqs_dropped': 0}
 
     for l in f:
         seq = l.sequence
