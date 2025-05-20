@@ -197,7 +197,7 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
         for itv in list1:
             # overlap_intervals = interval_trees[itv.chrom].search_interval(itv.start, itv.end)
             overlap_intervals = interval_trees[itv.chrom].find_overlaps(itv.start, itv.end)
-            for ol_start, ol_end, o_data in overlap_intervals:
+            for o_data in overlap_intervals:
                 if o_data.qname == query_key:
                     continue
                 b = tuple(sorted((o_data.qname, query_key)))
