@@ -125,6 +125,8 @@ def build_interval_trees(data):
     interval_tree = defaultdict(lambda: IntervalSet(with_data=True))
     for itv in data:
         interval_tree[itv.chrom].add(itv.start, itv.end, itv)
+    for k, v in interval_tree.items():
+        v.index()
     return interval_tree
 
 

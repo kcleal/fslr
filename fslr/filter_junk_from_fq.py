@@ -62,34 +62,49 @@ def compute_rep(seq):
 
 
 def check_for_concatemer(seq, target_primers, primers, primers_r):
+    # Minimum sequence length threshold - drop sequences shorter than 200bp
+    if len(seq) < 200:
+        return '_short'
 
+    # Define the end trim size - either 100bp or less if the sequence is short
+    trim_size = 100
     for k in target_primers:
-        for s in [primers[k], primers_r[k]]:
-            ls = len(s) * 4
-            if len(seq) < 4 * ls:
-                return True  # drop anyway
-            trim = seq[ls:len(seq)-ls]
-            # check alignment
+        for s in (primers[k], primers_r[k]):
+
+            trim = seq[trim_size:len(seq) - trim_size]
+            if not trim:
+                return '_short'
+
+            # Check alignment with chunking for long sequences
             if len(trim) > 10000:
                 seq_len = len(trim)
                 start = 0
-                end = 10_000
-                while True:
-                    # include small overlap
-                    sub = trim[max(0, start-len(s) - 1):min(end, seq_len)]
+                end = 10000
+                chunk_overlap = len(
+                    s) + 10  # Add a bit more overlap to ensure we don't miss alignments at chunk boundaries
+
+                while start < seq_len:  # Changed condition to be more explicit
+                    # Calculate chunk boundaries with overlap
+                    chunk_start = max(0, start - chunk_overlap if start > 0 else 0)
+                    chunk_end = min(end + chunk_overlap if end < seq_len else seq_len, seq_len)
+
+                    sub = trim[chunk_start:chunk_end]
                     aln = StripedSmithWaterman(s)(sub)
                     if aln.optimal_alignment_score >= 28:
-                        return True
-                    start += 10_000
-                    end += 10_000
-                    if start >= seq_len:
+                        return '_concatemer'
+
+                    # Move to next chunk
+                    if end >= seq_len:
                         break
+                    start += 10000
+                    end += 10000
             else:
+                # For shorter sequences, analyze the whole trimmed sequence at once
                 aln = StripedSmithWaterman(s)(trim)
                 if aln.optimal_alignment_score >= 28:
-                    return True
+                    return '_concatemer'
 
-    return False
+    return ''
 
 
 def telmer_pct(rot, s):
@@ -138,12 +153,12 @@ def get_seqs_to_drop(fq_input, primer_list, primers, primers_r, outfile, filter_
                     l.name += '_junk'
                 break
         else:
-            concat = check_for_concatemer(seq, primer_list, primers, primers_r)
-            if concat:
+            reason = check_for_concatemer(seq, primer_list, primers, primers_r)
+            if reason:
                 filter_counts['concatemers_dropped'] += 1
                 drop = True
                 if junkfile:
-                    l.name += '_concatemer'
+                    l.name += reason
 
         if not drop:
             filter_counts['total_kept'] += 1
