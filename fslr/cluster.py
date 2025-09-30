@@ -3,7 +3,7 @@ import networkx as nx
 import numpy as np
 import pysam
 # from sortedintersect import IntervalSet
-from superintervals import IntervalSet
+from superintervals import IntervalMap
 from collections import defaultdict, namedtuple
 
 
@@ -122,11 +122,11 @@ def prepare_data(bed_df, cluster_mask, chromosome_lengths, threshold=500_000):
 
 
 def build_interval_trees(data):
-    interval_tree = defaultdict(lambda: IntervalSet(with_data=True))
+    interval_tree = defaultdict(lambda: IntervalMap(with_data=True))
     for itv in data:
         interval_tree[itv.chrom].add(itv.start, itv.end, itv)
     for k, v in interval_tree.items():
-        v.index()
+        v.build()
     return interval_tree
 
 
@@ -198,7 +198,7 @@ def query_interval_trees(interval_trees, data, overlap_cutoff, jaccard_threshold
         edges = 0
         for itv in list1:
             # overlap_intervals = interval_trees[itv.chrom].search_interval(itv.start, itv.end)
-            overlap_intervals = interval_trees[itv.chrom].find_overlaps(itv.start, itv.end)
+            overlap_intervals = interval_trees[itv.chrom].search_values(itv.start, itv.end)
             for o_data in overlap_intervals:
                 if o_data.qname == query_key:
                     continue
